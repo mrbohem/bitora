@@ -1,0 +1,92 @@
+FROM php:8.4-fpm-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    linux-headers \
+    nginx \
+    supervisor \
+    curl \
+    zip \
+    unzip \
+    git \
+    libpng-dev \
+    libzip-dev \
+    openssl-dev \
+    brotli-dev \
+    oniguruma-dev \
+    postgresql-dev \
+    sqlite-dev \
+    docker-cli \
+    docker-cli-compose \
+    nodejs \
+    npm
+
+# Install PHP extensions
+RUN docker-php-ext-install \
+    pdo \
+    pdo_mysql \
+    pdo_pgsql \
+    pdo_sqlite \
+    mbstring \
+    zip \
+    gd \
+    pcntl \
+    sockets \
+    bcmath
+
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+# Copy obfuscated application code (will be built from obfuscated directory)
+COPY . .
+
+# Create production .env with DOCKER_USE_SUDO=true
+RUN if [ -f .env.example ]; then cp .env.example .env; fi \
+    && echo "" >> .env \
+    && echo "# Docker configuration for production container" >> .env \
+    && echo "DOCKER_USE_SUDO=true" >> .env
+
+# Build frontend assets
+RUN rm -f public/hot \
+    && npm install \
+    && npm run build
+
+# Laravel setup
+RUN composer dump-autoload --optimize --classmap-authoritative \
+    && php artisan key:generate \
+    && php artisan config:cache \
+    && php artisan route:cache \
+    && php artisan view:cache
+
+# Create storage directories
+RUN mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views \
+    && touch storage/logs/laravel.log storage/logs/worker.log
+
+# Set permissions
+RUN chown -R www-data:www-data /var/www/html \
+    && chmod -R 755 /var/www/html/storage \
+    && chmod -R 755 /var/www/html/bootstrap/cache
+
+# Give www-data access to Docker socket
+RUN apk add --no-cache sudo \
+    && echo "www-data ALL=(ALL) NOPASSWD: /usr/bin/docker" >> /etc/sudoers \
+    && echo "www-data ALL=(ALL) NOPASSWD: /usr/bin/docker-compose" >> /etc/sudoers
+
+# Set environment variable to enable sudo for Docker commands in container
+ENV DOCKER_USE_SUDO=true
+
+# Nginx configuration for /bitora subpath
+COPY docker/panel-nginx.conf /etc/nginx/nginx.conf
+COPY docker/panel-default.conf /etc/nginx/http.d/default.conf
+
+# Supervisor configuration
+RUN mkdir -p /var/log/supervisor
+COPY docker/panel-supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Expose port
+EXPOSE 80
+
+# Start supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

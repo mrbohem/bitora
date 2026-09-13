@@ -1,0 +1,142 @@
+@import 'tailwindcss';
+@import '../../vendor/livewire/flux/dist/flux.css';
+
+@source '../views';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../vendor/livewire/flux-pro/stubs/**/*.blade.php';
+@source '../../vendor/livewire/flux/stubs/**/*.blade.php';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+    /* Fonts - Lumina Forge Design System */
+    --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Geist', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+    /* Lumina Forge Color System */
+    /* Surface colors */
+    --color-surface: #0b1326;
+    --color-surface-dim: #0b1326;
+    --color-surface-bright: #31394d;
+    --color-surface-container-lowest: #060e20;
+    --color-surface-container-low: #131b2e;
+    --color-surface-container: #171f33;
+    --color-surface-container-high: #222a3d;
+    --color-surface-container-highest: #2d3449;
+
+    /* On-surface colors */
+    --color-on-surface: #dae2fd;
+    --color-on-surface-variant: #cbc3d7;
+    --color-inverse-surface: #dae2fd;
+    --color-inverse-on-surface: #283044;
+
+    /* Outline colors */
+    --color-outline: #958ea0;
+    --color-outline-variant: #494454;
+
+    /* Primary colors (Purple/Violet) */
+    --color-primary: #d0bcff;
+    --color-on-primary: #3c0091;
+    --color-primary-container: #a078ff;
+    --color-on-primary-container: #340080;
+    --color-inverse-primary: #6d3bd7;
+    --color-primary-fixed: #e9ddff;
+    --color-primary-fixed-dim: #d0bcff;
+    --color-on-primary-fixed: #23005c;
+    --color-on-primary-fixed-variant: #5516be;
+
+    /* Secondary colors (Emerald/Green) */
+    --color-secondary: #4edea3;
+    --color-on-secondary: #003824;
+    --color-secondary-container: #00a572;
+    --color-on-secondary-container: #00311f;
+    --color-secondary-fixed: #6ffbbe;
+    --color-secondary-fixed-dim: #4edea3;
+    --color-on-secondary-fixed: #002113;
+    --color-on-secondary-fixed-variant: #005236;
+
+    /* Tertiary colors (Rose/Red) */
+    --color-tertiary: #ffb2b7;
+    --color-on-tertiary: #67001b;
+    --color-tertiary-container: #ff516a;
+    --color-on-tertiary-container: #5b0017;
+    --color-tertiary-fixed: #ffdadb;
+    --color-tertiary-fixed-dim: #ffb2b7;
+    --color-on-tertiary-fixed: #40000d;
+    --color-on-tertiary-fixed-variant: #92002a;
+
+    /* Error colors */
+    --color-error: #ffb4ab;
+    --color-on-error: #690005;
+    --color-error-container: #93000a;
+    --color-on-error-container: #ffdad6;
+
+    /* Background */
+    --color-background: #0b1326;
+    --color-on-background: #dae2fd;
+
+    /* Surface variant */
+    --color-surface-variant: #2d3449;
+    --color-surface-tint: #d0bcff;
+
+    /* Semantic state colors (matching design spec) */
+    --color-success: #4edea3;
+    --color-warning: #fbbf24;
+    --color-danger: #ff516a;
+
+    /* Border colors */
+    --color-border: #334155;
+    --color-border-dim: #494454;
+
+    /* Accent mapping for Flux compatibility */
+    --color-accent: var(--color-primary);
+    --color-accent-content: var(--color-primary);
+    --color-accent-foreground: var(--color-on-primary);
+
+    /* Border radius */
+    --radius-sm: 0.25rem;  /* 4px */
+    --radius-md: 0.5rem;   /* 8px */
+    --radius-lg: 0.75rem;  /* 12px */
+
+    /* Layout dimensions */
+    --sidebar-width: 260px;
+    --container-max: 1440px;
+}
+
+@layer theme {
+    .dark {
+        --color-accent: var(--color-primary);
+        --color-accent-content: var(--color-primary);
+        --color-accent-foreground: var(--color-on-primary);
+    }
+}
+
+@layer base {
+
+    *,
+    ::after,
+    ::before,
+    ::backdrop,
+    ::file-selector-button {
+        border-color: var(--color-gray-200, currentColor);
+    }
+}
+
+[data-flux-field]:not(ui-radio, ui-checkbox) {
+    @apply grid gap-2;
+}
+
+[data-flux-label] {
+    @apply  !mb-0 !leading-tight;
+}
+
+input:focus[data-flux-control],
+textarea:focus[data-flux-control],
+select:focus[data-flux-control] {
+    @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-accent-foreground;
+}
+
+/* \[:where(&)\]:size-4 {
+    @apply size-4;
+} */

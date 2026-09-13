@@ -1,0 +1,34 @@
+# Development files - exclude local .env so production .env is created in Dockerfile
+.env
+.env.local
+.env.*.local
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.phpunit.result.cache
+phpunit.xml
+tests
+
+# Storage and cache
+/storage/*.key
+/storage/logs
+/storage/app/projects
+/storage/framework/cache
+/storage/framework/sessions
+/storage/framework/testing
+/storage/framework/views
