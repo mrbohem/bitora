@@ -65,14 +65,14 @@ final class TerminalProcessManager
         );
         $docker = config('app.docker_use_sudo', false) ? 'sudo docker' : 'docker';
         $shell = sprintf(
-            '%s exec -it %s /bin/sh -c %s',
+            '%s exec -u root -it %s /bin/sh -c %s',
             $docker,
             escapeshellarg($containerId),
             escapeshellarg('stty -echo; exec /bin/sh')
         );
         $pty = PHP_OS_FAMILY === 'Darwin'
-            ? sprintf('script -q /dev/null %s', $shell)
-            : sprintf('script -q -c %s /dev/null', escapeshellarg($shell));
+            ? sprintf('env SHELL=/bin/sh script -q /dev/null %s', $shell)
+            : sprintf('env SHELL=/bin/sh script -q -c %s /dev/null', escapeshellarg($shell));
         $command = base64_encode(sprintf(
             'php -r %s | %s > %s 2>&1',
             escapeshellarg($inputFollower),
