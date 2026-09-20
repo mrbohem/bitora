@@ -147,6 +147,11 @@
                 style="{{ $activeTab === 'logs' ? 'background-color: var(--color-surface-container); color: var(--color-primary); border-bottom: 2px solid var(--color-primary);' : 'color: var(--color-on-surface-variant);' }}">
             {{ __('Logs') }}
         </button>
+        <button wire:click="$set('activeTab', 'terminal')" type="button"
+                class="px-4 py-2 font-medium text-sm rounded-t-lg transition-colors"
+                style="{{ $activeTab === 'terminal' ? 'background-color: var(--color-surface-container); color: var(--color-primary); border-bottom: 2px solid var(--color-primary);' : 'color: var(--color-on-surface-variant);' }}">
+            {{ __('Terminal') }}
+        </button>
         <button wire:click="$set('activeTab', 'env')" type="button"
                 class="px-4 py-2 font-medium text-sm rounded-t-lg transition-colors"
                 style="{{ $activeTab === 'env' ? 'background-color: var(--color-surface-container); color: var(--color-primary); border-bottom: 2px solid var(--color-primary);' : 'color: var(--color-on-surface-variant);' }}">
@@ -210,6 +215,12 @@
                             <div class="flex items-center justify-between">
                                 <span class="text-sm" style="color: var(--color-on-surface-variant);">{{ __('Memory Usage') }}</span>
                                 <span class="font-mono text-sm" style="color: var(--color-on-surface);">{{ $this->containerStats['memory_usage'] ?? 'N/A' }}</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm" style="color: var(--color-on-surface-variant);">{{ __('Storage Usage / Limit') }}</span>
+                                <span class="font-mono text-sm" style="color: var(--color-on-surface);">
+                                    {{ $this->containerStats['storage_usage'] ?? 'N/A' }} / {{ $this->containerStats['storage_limit'] ?? 'Unlimited' }}
+                                </span>
                             </div>
                             <div class="flex items-center justify-between">
                                 <span class="text-sm" style="color: var(--color-on-surface-variant);">{{ __('Network I/O') }}</span>
@@ -367,6 +378,21 @@
                 <x-alert variant="info">
                     {{ __('Showing container logs (stdout/stderr). Logs are fetched in real-time from Docker.') }}
                 </x-alert>
+            </div>
+        @endif
+
+        <!-- Terminal Tab -->
+        @if($activeTab === 'terminal')
+            <div class="space-y-4">
+                <div
+                    wire:ignore
+                    x-data
+                    x-init="window.initProjectTerminal($el)"
+                    tabindex="0"
+                    data-project-id="{{ $project->id }}"
+                    class="h-[560px] w-full rounded-lg p-3"
+                    style="background-color: #111827; border: 1px solid var(--color-outline-variant);"
+                ></div>
             </div>
         @endif
 

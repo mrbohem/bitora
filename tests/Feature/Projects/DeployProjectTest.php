@@ -28,7 +28,6 @@ test('deployment service validates docker availability', function () {
 
     expect(fn () => $deploymentService->deployProject($this->user, [
         'name' => 'Test Project',
-        'php_version' => '8.4',
     ]))->toThrow(RuntimeException::class, 'Docker is not installed or not running');
 });
 
@@ -42,7 +41,6 @@ test('project creation stores correct docker fields', function () {
         'git_auth_type' => 'token',
         'git_credentials' => 'ghp_test_token',
         'app_path' => 'apps/laravel',
-        'php_version' => '8.3',
         'domain' => 'test.example.com',
         'queue_enabled' => true,
         'queue_connection' => 'redis',
@@ -63,13 +61,32 @@ test('project creation stores correct docker fields', function () {
     expect($project->git_branch)->toBe('develop');
     expect($project->git_auth_type)->toBe('token');
     expect($project->app_path)->toBe('apps/laravel');
-    expect($project->php_version)->toBe('8.3');
+    expect($project->php_version)->toBe('8.4');
     expect($project->reverb_enabled)->toBeFalse();
     expect($project->octane_enabled)->toBeFalse();
     expect($project->octane_server)->toBeNull();
     expect($project->queue_enabled)->toBeTrue();
     expect($project->queue_connection)->toBe('redis');
     expect($project->queue_workers)->toBe(3);
+});
+
+test('project creation stores configured resource limits', function () {
+    Process::fake();
+
+    $containerService = Mockery::mock(ContainerManagementService::class);
+    $containerService->shouldReceive('isDockerAvailable')->andReturn(true);
+    $containerService->shouldReceive('isDockerComposeAvailable')->andReturn(true);
+    $containerService->shouldReceive('startContainer')->andReturn('container123');
+    $this->app->instance(ContainerManagementService::class, $containerService);
+
+    $project = app(DeploymentService::class)->deployProject($this->user, [
+        'name' => 'Limited Project',
+        'memory_limit_mb' => 512,
+        'storage_limit_gb' => 10,
+    ]);
+
+    expect($project->memory_limit_mb)->toBe(512)
+        ->and($project->storage_limit_gb)->toBe(10);
 });
 
 test('git credentials are encrypted in database', function () {
@@ -86,7 +103,6 @@ test('git credentials are encrypted in database', function () {
         'name' => 'Secure Project',
         'git_auth_type' => 'ssh',
         'git_credentials' => 'ssh-private-key-content',
-        'php_version' => '8.4',
     ]);
 
     // Raw DB value should be encrypted
@@ -144,6 +160,7 @@ test('deploy job enables Octane when the application requires it', function () {
     File::ensureDirectoryExists($projectPath, 0755, true);
     File::put("{$projectPath}/composer.json", json_encode([
         'require' => [
+            'php' => '^8.3',
             'laravel/octane' => '^2.0',
             'laravel/reverb' => '^1.0',
         ],
@@ -158,6 +175,7 @@ test('deploy job enables Octane when the application requires it', function () {
     expect($project->fresh()->octane_enabled)->toBeTrue();
     expect($project->fresh()->octane_server)->toBe('swoole');
     expect($project->fresh()->reverb_enabled)->toBeTrue();
+    expect($project->fresh()->php_version)->toBe('8.4');
 
     File::deleteDirectory($projectPath);
 });
@@ -232,6 +250,34 @@ test('deploy job leaves standard PHP-FPM enabled when Octane is absent', functio
     expect($project->fresh()->octane_enabled)->toBeFalse();
     expect($project->fresh()->octane_server)->toBeNull();
     expect($project->fresh()->reverb_enabled)->toBeFalse();
+    expect($project->fresh()->php_version)->toBe('8.4');
+
+    File::deleteDirectory($projectPath);
+});
+
+test('deploy job selects a PHP version supported by the locked dependency graph', function () {
+    $project = Project::factory()->create([
+        'user_id' => $this->user->id,
+    ]);
+
+    $projectPath = storage_path('app/projects/php-version-detection-test');
+    File::ensureDirectoryExists($projectPath, 0755, true);
+    File::put("{$projectPath}/composer.json", json_encode([
+        'require' => ['php' => '^7.4|^8.0'],
+    ]));
+    File::put("{$projectPath}/composer.lock", json_encode([
+        'packages' => [[
+            'name' => 'example/package',
+            'require' => ['php' => '>=8.0.2 <8.2'],
+        ]],
+    ]));
+
+    $job = new DeployProjectJob($project, []);
+    $method = new ReflectionMethod($job, 'detectApplicationFeatures');
+    $method->setAccessible(true);
+    $method->invoke($job, $projectPath);
+
+    expect($project->fresh()->php_version)->toBe('8.1');
 
     File::deleteDirectory($projectPath);
 });
@@ -248,7 +294,6 @@ test('project status progresses through deployment stages', function () {
     $deploymentService = app(DeploymentService::class);
     $project = $deploymentService->deployProject($this->user, [
         'name' => 'Status Test',
-        'php_version' => '8.4',
     ]);
 
     expect($project->status)->toBe('active');

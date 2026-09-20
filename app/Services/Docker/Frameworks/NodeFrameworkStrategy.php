@@ -7,7 +7,7 @@ use App\Services\Docker\Contracts\FrameworkStrategyInterface;
 
 class NodeFrameworkStrategy implements FrameworkStrategyInterface
 {
-    public function generateDockerfile(Project $project): string
+    public function generateDockerfile(Project $project, ?string $projectPath = null): string
     {
         $nodeVersion = $project->node_version ?? '20-alpine';
 

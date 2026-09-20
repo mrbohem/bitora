@@ -36,7 +36,7 @@ class DeploymentService
             'git_auth_type' => $data['git_auth_type'] ?? 'none',
             'git_credentials' => $data['git_credentials'] ?? null,
             'app_path' => $this->normalizeAppPath($data['app_path'] ?? '.'),
-            'php_version' => $data['php_version'] ?? '8.4',
+            'php_version' => '8.4',
             'domain' => $data['domain'] ?? null,
             'document_root' => $this->determineDocumentRoot($data),
             // Reverb is detected from the deployed application's dependencies.
@@ -47,6 +47,8 @@ class DeploymentService
             'queue_enabled' => $data['queue_enabled'] ?? false,
             'queue_connection' => $data['queue_connection'] ?? 'redis',
             'queue_workers' => $data['queue_workers'] ?? 1,
+            'memory_limit_mb' => $data['memory_limit_mb'] ?? null,
+            'storage_limit_gb' => $data['storage_limit_gb'] ?? null,
             'status' => 'pending',
         ]);
 

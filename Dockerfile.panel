@@ -18,6 +18,7 @@ RUN apk add --no-cache \
     sqlite-dev \
     docker-cli \
     docker-cli-compose \
+    util-linux \
     nodejs \
     npm
 

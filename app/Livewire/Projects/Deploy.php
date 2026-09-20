@@ -2,7 +2,10 @@
 
 namespace App\Livewire\Projects;
 
+use App\Services\ContainerManagementService;
+use App\Services\ContainerResourceService;
 use App\Services\DeploymentService;
+use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 
 class Deploy extends Component
@@ -22,9 +25,6 @@ class Deploy extends Component
 
     public $git_credentials = '';
 
-    // Configuration (Step 2)
-    public $php_version = '8.4';
-
     public $domain = '';
 
     // Features (Step 3)
@@ -34,6 +34,16 @@ class Deploy extends Component
 
     public $queue_workers = 1;
 
+    // Resource limits
+    public $memory_limit_mb;
+
+    public $storage_limit_gb;
+
+    public array $availableResources = [
+        'memory_mb' => null,
+        'storage_gb' => null,
+    ];
+
     // Environment Variables (Step 4)
     public $env_variables = [];
 
@@ -41,9 +51,9 @@ class Deploy extends Component
 
     public $env_value = '';
 
-    public function mount()
+    public function mount(ContainerManagementService $containerService): void
     {
-        // Initialize with defaults
+        $this->availableResources = $containerService->getAvailableResources();
     }
 
     public function updatedGitAuthType($value)
@@ -54,13 +64,13 @@ class Deploy extends Component
         }
     }
 
-    public function nextStep()
+    public function nextStep(ContainerResourceService $resourceService): void
     {
-        $this->validateCurrentStep();
+        $this->validateCurrentStep($resourceService);
         $this->step++;
     }
 
-    public function previousStep()
+    public function previousStep(): void
     {
         $this->step--;
     }
@@ -82,7 +92,7 @@ class Deploy extends Component
         unset($this->env_variables[$key]);
     }
 
-    public function deploy(DeploymentService $deploymentService)
+    public function deploy(DeploymentService $deploymentService, ContainerResourceService $resourceService)
     {
         $validated = $this->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -91,13 +101,16 @@ class Deploy extends Component
             'app_path' => ['required', 'string', 'max:255', 'regex:/^(?:\.|[A-Za-z0-9_][A-Za-z0-9._\/-]*)$/'],
             'git_auth_type' => ['required', 'in:none,ssh,token'],
             'git_credentials' => ['nullable', 'string'],
-            'php_version' => ['required', 'in:8.2,8.3,8.4'],
             'domain' => ['nullable', 'string', 'max:255'],
             'queue_enabled' => ['boolean'],
             'queue_connection' => ['nullable', 'required_if:queue_enabled,true', 'string', 'max:50'],
             'queue_workers' => ['nullable', 'integer', 'min:1', 'max:10'],
+            'memory_limit_mb' => ['nullable', 'integer', 'min:128'],
+            'storage_limit_gb' => ['nullable', 'integer', 'min:1'],
             'env_variables' => ['nullable', 'array'],
         ]);
+
+        $this->validateResourceLimits($resourceService);
 
         // Clear credentials if auth type is 'none'
         if ($validated['git_auth_type'] === 'none') {
@@ -115,7 +128,7 @@ class Deploy extends Component
         }
     }
 
-    public function validateCurrentStep()
+    public function validateCurrentStep(ContainerResourceService $resourceService): void
     {
         $rules = match ($this->step) {
             1 => [
@@ -126,18 +139,40 @@ class Deploy extends Component
                 'git_auth_type' => ['required', 'in:none,ssh,token'],
             ],
             2 => [
-                'php_version' => ['required', 'in:8.2,8.3,8.4'],
                 'domain' => ['nullable', 'string', 'max:255'],
             ],
             3 => [
                 'queue_enabled' => ['boolean'],
                 'queue_connection' => ['nullable', 'required_if:queue_enabled,true', 'string', 'max:50'],
                 'queue_workers' => ['nullable', 'integer', 'min:1', 'max:10'],
+                'memory_limit_mb' => ['nullable', 'integer', 'min:128'],
+                'storage_limit_gb' => ['nullable', 'integer', 'min:1'],
             ],
             default => [],
         };
 
         $this->validate($rules);
+
+        if ($this->step === 3) {
+            $this->validateResourceLimits($resourceService);
+        }
+    }
+
+    private function validateResourceLimits(ContainerResourceService $resourceService): void
+    {
+        $errors = $resourceService->validateLimits(
+            $this->memory_limit_mb,
+            $this->storage_limit_gb,
+            $this->availableResources,
+        );
+
+        foreach ($errors as $field => $message) {
+            $this->addError($field, $message);
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 
     public function render()

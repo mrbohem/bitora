@@ -6,9 +6,10 @@ use App\Models\Project;
 use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\ContainerManagementService;
+use App\Services\ContainerTerminalService;
 use App\Services\DeploymentService;
 use App\Services\EnvironmentService;
-use App\Services\GitService;
+use App\Services\ProjectSyncService;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -142,6 +143,98 @@ test('refresh button syncs variables from .env file', function () {
     expect(EnvironmentVariable::where('project_id', $this->project->id)->where('key', 'NEW_KEY')->exists())->toBeTrue();
 });
 
+test('user can run a command in the project container', function () {
+    $envService = Mockery::mock(EnvironmentService::class);
+    $envService->shouldReceive('readLiveEnv')->once()->andReturn([]);
+    $this->app->instance(EnvironmentService::class, $envService);
+
+    $containerService = Mockery::mock(ContainerManagementService::class);
+    $containerService->shouldReceive('getContainerStatus')
+        ->andReturn(['status' => 'running', 'running' => true]);
+    $containerService->shouldReceive('getContainerStats')
+        ->andReturn([]);
+    $containerService->shouldReceive('execCommand')
+        ->once()
+        ->with(
+            Mockery::on(fn ($project) => $project->id === $this->project->id),
+            'php artisan about'
+        )
+        ->andReturn('Laravel Version: 12.x');
+    $this->app->instance(ContainerManagementService::class, $containerService);
+
+    Livewire::actingAs($this->user)
+        ->test(Show::class, ['project' => $this->project])
+        ->set('commandInput', 'php artisan about')
+        ->call('executeCommand')
+        ->assertSet('commandOutput', 'Laravel Version: 12.x')
+        ->assertSet('commandError', '')
+        ->assertDispatched('notify');
+});
+
+test('command execution errors are shown to the user', function () {
+    $envService = Mockery::mock(EnvironmentService::class);
+    $envService->shouldReceive('readLiveEnv')->once()->andReturn([]);
+    $this->app->instance(EnvironmentService::class, $envService);
+
+    $containerService = Mockery::mock(ContainerManagementService::class);
+    $containerService->shouldReceive('getContainerStatus')
+        ->andReturn(['status' => 'running', 'running' => true]);
+    $containerService->shouldReceive('getContainerStats')
+        ->andReturn([]);
+    $containerService->shouldReceive('execCommand')
+        ->once()
+        ->andThrow(new RuntimeException('Container not found'));
+    $this->app->instance(ContainerManagementService::class, $containerService);
+
+    Livewire::actingAs($this->user)
+        ->test(Show::class, ['project' => $this->project])
+        ->set('commandInput', 'php artisan about')
+        ->call('executeCommand')
+        ->assertSet('commandOutput', '')
+        ->assertSet('commandError', 'Container not found')
+        ->assertDispatched('notify');
+});
+
+test('terminal accepts keyboard input', function () {
+    $containerService = Mockery::mock(ContainerTerminalService::class);
+    $containerService->shouldReceive('write')
+        ->once()
+        ->with(
+            Mockery::on(fn ($project) => $project->id === $this->project->id),
+            'terminal-token',
+            'ls'
+        );
+    $this->app->instance(ContainerTerminalService::class, $containerService);
+
+    $this->actingAs($this->user)
+        ->postJson(route('projects.terminal.input', [
+            'project' => $this->project,
+            'token' => 'terminal-token',
+        ]), ['input_base64' => base64_encode('ls')])
+        ->assertOk()
+        ->assertJson(['ok' => true]);
+});
+
+test('terminal preserves carriage returns for keyboard input', function () {
+    $containerService = Mockery::mock(ContainerTerminalService::class);
+    $containerService->shouldReceive('write')
+        ->once()
+        ->with(
+            Mockery::on(fn ($project) => $project->id === $this->project->id),
+            'terminal-token',
+            "\r"
+        );
+    $this->app->instance(ContainerTerminalService::class, $containerService);
+
+    $this->actingAs($this->user)
+        ->postJson(route('projects.terminal.input', [
+            'project' => $this->project,
+            'token' => 'terminal-token',
+        ]), ['input_base64' => base64_encode("\r")])
+        ->assertOk()
+        ->assertJson(['ok' => true]);
+});
+
 test('manual github sync pulls latest code and restarts the app', function () {
     $this->project->update([
         'git_repo' => 'https://github.com/test/repo.git',
@@ -150,20 +243,17 @@ test('manual github sync pulls latest code and restarts the app', function () {
         'status' => 'active',
     ]);
 
-    $gitService = Mockery::mock(GitService::class);
-    $gitService->shouldReceive('pullRepository')
+    $projectSyncService = Mockery::mock(ProjectSyncService::class);
+    $projectSyncService->shouldReceive('sync')
         ->once()
-        ->with($this->project, Mockery::type('string'));
-    $this->app->instance(GitService::class, $gitService);
+        ->withArgs(fn ($project) => $project->id === $this->project->id);
+    $this->app->instance(ProjectSyncService::class, $projectSyncService);
 
     $containerService = Mockery::mock(ContainerManagementService::class);
     $containerService->shouldReceive('getContainerStatus')
         ->andReturn(['status' => 'running', 'running' => true]);
     $containerService->shouldReceive('getContainerStats')
         ->andReturn(['cpu_percent' => '10%', 'memory_usage' => '50MB', 'network_io' => '1KB']);
-    $containerService->shouldReceive('restartContainer')
-        ->once()
-        ->with($this->project, Mockery::type('string'));
     $this->app->instance(ContainerManagementService::class, $containerService);
 
     Livewire::actingAs($this->user)
@@ -181,20 +271,13 @@ test('github webhook auto syncs when enabled', function () {
         'github_auto_update' => true,
     ]);
 
-    $gitService = Mockery::mock(GitService::class);
-    $gitService->shouldReceive('pullRepository')
+    $projectSyncService = Mockery::mock(ProjectSyncService::class);
+    $projectSyncService->shouldReceive('sync')
         ->once()
-        ->withArgs(function ($project, $path) {
-            return $project->id === $this->project->id && is_string($path);
-        });
-    $this->app->instance(GitService::class, $gitService);
+        ->withArgs(fn ($project) => $project->id === $this->project->id);
+    $this->app->instance(ProjectSyncService::class, $projectSyncService);
 
     $containerService = Mockery::mock(ContainerManagementService::class);
-    $containerService->shouldReceive('restartContainer')
-        ->once()
-        ->withArgs(function ($project, $path) {
-            return $project->id === $this->project->id && is_string($path);
-        });
     $this->app->instance(ContainerManagementService::class, $containerService);
 
     $this->actingAs($this->user)

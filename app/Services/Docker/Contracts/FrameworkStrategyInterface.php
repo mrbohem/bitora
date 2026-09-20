@@ -9,7 +9,7 @@ interface FrameworkStrategyInterface
     /**
      * Generate Dockerfile content for the project.
      */
-    public function generateDockerfile(Project $project): string;
+    public function generateDockerfile(Project $project, ?string $projectPath = null): string;
 
     /**
      * Generate Nginx configuration files for the project.

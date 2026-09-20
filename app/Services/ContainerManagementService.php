@@ -3,10 +3,15 @@
 namespace App\Services;
 
 use App\Models\Project;
+use App\Services\Contracts\ContainerCommandExecutor;
 use Illuminate\Support\Facades\Process;
 
-class ContainerManagementService
+class ContainerManagementService implements ContainerCommandExecutor
 {
+    public function __construct(
+        private readonly ContainerResourceService $resourceService
+    ) {}
+
     /**
      * Get docker command prefix (with or without sudo based on environment)
      * In production Docker containers, www-data user needs sudo
@@ -26,7 +31,7 @@ class ContainerManagementService
     {
         $result = Process::timeout(120)
             ->path($projectPath)
-            ->run($this->dockerCmd('docker-compose up -d'));
+            ->run($this->dockerCmd('docker-compose up -d --force-recreate'));
 
         if ($result->failed()) {
             throw new \RuntimeException("Failed to start container: {$result->errorOutput()}");
@@ -59,7 +64,7 @@ class ContainerManagementService
     {
         $result = Process::timeout(120)
             ->path($projectPath)
-            ->run($this->dockerCmd('docker-compose restart'));
+            ->run($this->dockerCmd('docker-compose up -d --force-recreate'));
 
         if ($result->failed()) {
             throw new \RuntimeException("Failed to restart container: {$result->errorOutput()}");
@@ -171,7 +176,13 @@ class ContainerManagementService
             throw new \RuntimeException('Container not found');
         }
 
-        $result = Process::timeout(300)->run($this->dockerCmd("docker exec {$containerId} {$command}"));
+        $dockerCommand = sprintf(
+            'docker exec %s sh -lc %s',
+            escapeshellarg($containerId),
+            escapeshellarg($command)
+        );
+
+        $result = Process::timeout(300)->run($this->dockerCmd($dockerCommand));
 
         if ($result->failed()) {
             throw new \RuntimeException("Command execution failed: {$result->errorOutput()}");
@@ -185,7 +196,7 @@ class ContainerManagementService
      */
     public function getContainerStats(Project $project): array
     {
-        $containerId = $project->container_id;
+        $containerId = $project->container_id ?? $this->getContainerId($project);
 
         if (! $containerId) {
             return [];
@@ -198,13 +209,48 @@ class ContainerManagementService
         }
 
         $stats = explode('|', trim($result->output()));
+        $containerLimitResult = Process::run($this->dockerCmd("docker inspect {$containerId} --format='{{.HostConfig.Memory}}'"));
+        $containerLimitBytes = trim($containerLimitResult->output());
+        $memoryLimit = $containerLimitResult->successful() && is_numeric($containerLimitBytes) && (int) $containerLimitBytes > 0
+            ? $this->formatBytes((int) $containerLimitBytes)
+            : ($project->memory_limit_mb !== null ? "{$project->memory_limit_mb}MB" : null);
+        $storageResult = Process::run($this->dockerCmd("docker inspect --size {$containerId} --format='{{.SizeRw}}'"));
+        $storageBytes = trim($storageResult->output());
 
         return [
             'cpu_percent' => $stats[0] ?? '0%',
-            'memory_usage' => $stats[1] ?? '0B / 0B',
+            'memory_usage' => $this->formatMemoryUsage($stats[1] ?? '0B', $memoryLimit),
             'network_io' => $stats[2] ?? '0B / 0B',
             'block_io' => $stats[3] ?? '0B / 0B',
+            'storage_usage' => $storageResult->successful() && is_numeric($storageBytes)
+                ? $this->formatBytes((int) $storageBytes)
+                : 'N/A',
+            'storage_limit' => $project->storage_limit_gb !== null
+                ? "{$project->storage_limit_gb}GB"
+                : 'Unlimited',
         ];
+    }
+
+    private function formatMemoryUsage(string $memoryUsage, ?string $memoryLimit): string
+    {
+        $usedMemory = trim(explode('/', $memoryUsage, 2)[0]);
+
+        return $memoryLimit !== null
+            ? "{$usedMemory} / {$memoryLimit}"
+            : $memoryUsage;
+    }
+
+    private function formatBytes(int $bytes): string
+    {
+        if ($bytes < 1024 * 1024) {
+            return round($bytes / 1024, 1).' KiB';
+        }
+
+        if ($bytes < 1024 * 1024 * 1024) {
+            return round($bytes / 1024 / 1024, 1).' MiB';
+        }
+
+        return round($bytes / 1024 / 1024 / 1024, 2).' GiB';
     }
 
     /**
@@ -232,6 +278,16 @@ class ContainerManagementService
         $result = Process::run($this->dockerCmd('docker-compose --version'));
 
         return $result->successful();
+    }
+
+    /**
+     * Get resources available to deploy containers.
+     *
+     * @return array{memory_mb: int|null, storage_gb: int|null}
+     */
+    public function getAvailableResources(): array
+    {
+        return $this->resourceService->availableResources();
     }
 
     /**

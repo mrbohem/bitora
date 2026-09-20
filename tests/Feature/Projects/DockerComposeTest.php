@@ -103,3 +103,41 @@ test('generated docker compose includes required traefik network and routing lab
 
     File::deleteDirectory($projectPath);
 });
+
+test('generated docker compose includes configured resource limits', function () {
+    $project = Project::factory()->create([
+        'user_id' => $this->user->id,
+        'memory_limit_mb' => 512,
+        'storage_limit_gb' => 10,
+    ]);
+
+    $projectPath = storage_path('app/test-project-resource-limits');
+    File::ensureDirectoryExists($projectPath);
+
+    $composePath = $this->service->generateComposeFile($project, $projectPath);
+    $content = File::get($composePath);
+
+    expect($content)
+        ->toContain('mem_limit: 512m')
+        ->toContain('memswap_limit: 512m')
+        ->toContain("storage_opt:\n      size: 10G");
+
+    File::deleteDirectory($projectPath);
+});
+
+test('generated docker compose keeps resource limits unset by default', function () {
+    $project = Project::factory()->create(['user_id' => $this->user->id]);
+
+    $projectPath = storage_path('app/test-project-default-resources');
+    File::ensureDirectoryExists($projectPath);
+
+    $composePath = $this->service->generateComposeFile($project, $projectPath);
+    $content = File::get($composePath);
+
+    expect($content)
+        ->not->toContain('mem_limit:')
+        ->not->toContain('memswap_limit:')
+        ->not->toContain('storage_opt:');
+
+    File::deleteDirectory($projectPath);
+});
