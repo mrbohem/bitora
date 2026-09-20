@@ -21,7 +21,7 @@ class DockerImageService
         $dockerfilePath = "{$projectPath}/Dockerfile";
         $strategy = $this->strategyFactory->make($project);
 
-        $dockerfileContent = $strategy->generateDockerfile($project);
+        $dockerfileContent = $strategy->generateDockerfile($project, $projectPath);
         File::put($dockerfilePath, $dockerfileContent);
 
         return $dockerfilePath;

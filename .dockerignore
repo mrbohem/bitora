@@ -3,8 +3,7 @@
 .env.local
 .env.*.local
 
-# Git
-.git
+# Keep the repository metadata in the image so running containers can pull updates.
 .gitignore
 .gitattributes
 

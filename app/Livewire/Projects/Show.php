@@ -9,10 +9,9 @@ use App\Models\Project;
 use App\Services\ContainerManagementService;
 use App\Services\DeploymentService;
 use App\Services\EnvironmentService;
-use App\Services\GitService;
+use App\Services\ProjectSyncService;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
-use Livewire\Attributes\On;
 use Livewire\Component;
 
 class Show extends Component
@@ -51,6 +50,13 @@ class Show extends Component
     // Logs tab
     public $logLines = 100;
 
+    // Terminal tab
+    public string $commandInput = '';
+
+    public string $commandOutput = '';
+
+    public string $commandError = '';
+
     public function mount(Project $project, EnvironmentService $environmentService)
     {
         abort_unless($project->user_id === auth()->id(), 403);
@@ -75,7 +81,6 @@ class Show extends Component
         }
     }
 
-    #[On('echo-private:project.{project.id},deployment.status')]
     public function updateDeploymentStatus($event)
     {
         $this->deploymentStatus = $event['status'];
@@ -210,7 +215,7 @@ class Show extends Component
         $this->dispatch('notify', message: 'Environment variables refreshed from .env file!', type: 'success');
     }
 
-    public function syncFromGitHub(): void
+    public function syncFromGitHub(ProjectSyncService $projectSyncService): void
     {
         if (blank($this->project->git_repo)) {
             $this->dispatch('notify', message: 'This project is not connected to a GitHub repository.', type: 'error');
@@ -219,13 +224,7 @@ class Show extends Component
         }
 
         try {
-            $gitService = app(GitService::class);
-            $containerService = app(ContainerManagementService::class);
-            $projectPath = app(DeploymentService::class)->getProjectPath($this->project);
-
-            $gitService->pullRepository($this->project, $projectPath);
-            $containerService->restartContainer($this->project, $projectPath);
-            $this->project->update(['status' => 'active']);
+            $projectSyncService->sync($this->project);
 
             $this->dispatch('notify', message: 'GitHub code synced successfully!', type: 'success');
         } catch (\Throwable $e) {
@@ -268,6 +267,23 @@ class Show extends Component
     {
         unset($this->logs);
         $this->dispatch('notify', message: 'Logs refreshed!', type: 'success');
+    }
+
+    public function executeCommand(ContainerManagementService $containerService): void
+    {
+        $validated = $this->validate([
+            'commandInput' => ['required', 'string', 'max:5000'],
+        ]);
+
+        try {
+            $this->commandOutput = $containerService->execCommand($this->project, $validated['commandInput']);
+            $this->commandError = '';
+            $this->dispatch('notify', message: 'Command executed successfully!', type: 'success');
+        } catch (\RuntimeException $exception) {
+            $this->commandOutput = '';
+            $this->commandError = $exception->getMessage();
+            $this->dispatch('notify', message: 'Command execution failed.', type: 'error');
+        }
     }
 
     public function render()

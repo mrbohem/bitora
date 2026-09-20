@@ -53,6 +53,17 @@ class DockerComposeService
             ],
         ];
 
+        if ($project->memory_limit_mb !== null) {
+            $compose['services']['app']['mem_limit'] = "{$project->memory_limit_mb}m";
+            $compose['services']['app']['memswap_limit'] = "{$project->memory_limit_mb}m";
+        }
+
+        if ($project->storage_limit_gb !== null) {
+            $compose['services']['app']['storage_opt'] = [
+                'size' => "{$project->storage_limit_gb}G",
+            ];
+        }
+
         return $this->arrayToYaml($compose);
     }
 

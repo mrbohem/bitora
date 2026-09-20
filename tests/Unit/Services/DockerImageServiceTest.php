@@ -25,6 +25,98 @@ test('generates dockerfile with correct php version', function () {
 
     $content = File::get($dockerfilePath);
     expect($content)->toContain('FROM php:8.3-fpm-alpine');
+    expect($content)
+        ->toContain('Make memory reporting cgroup-aware')
+        ->toContain('/sys/fs/cgroup/memory.max');
+    expect($content)->toContain('docker-php-ext-install pdo pdo_mysql pdo_pgsql pdo_sqlite mbstring exif pcntl bcmath gd zip sockets intl');
+    expect($content)->toContain('composer install --no-dev --no-plugins --optimize-autoloader --no-interaction');
+    expect($content)->toContain('git config --global --add safe.directory /var/www/html');
+
+    File::deleteDirectory($projectPath);
+});
+
+test('installs PHP extensions required by the locked Composer dependencies', function () {
+    $project = Project::factory()->create(['user_id' => $this->user->id]);
+    $projectPath = storage_path('app/test-project');
+    File::ensureDirectoryExists($projectPath);
+    File::put("{$projectPath}/composer.json", json_encode([
+        'require' => ['php' => '^8.4'],
+    ]));
+    File::put("{$projectPath}/composer.lock", json_encode([
+        'packages' => [[
+            'name' => 'example/ar-php',
+            'require' => ['ext-calendar' => '*'],
+        ]],
+    ]));
+
+    $dockerfilePath = $this->service->generateDockerfile($project, $projectPath);
+
+    expect(File::get($dockerfilePath))
+        ->toContain('docker-php-ext-install pdo pdo_mysql pdo_pgsql pdo_sqlite mbstring exif pcntl bcmath gd zip sockets intl calendar');
+
+    File::deleteDirectory($projectPath);
+});
+
+test('fails clearly when Composer requires an unsupported PHP extension', function () {
+    $project = Project::factory()->create(['user_id' => $this->user->id]);
+    $projectPath = storage_path('app/test-project');
+    File::ensureDirectoryExists($projectPath);
+    File::put("{$projectPath}/composer.lock", json_encode([
+        'packages' => [[
+            'name' => 'example/package',
+            'require' => ['ext-custom' => '*'],
+        ]],
+    ]));
+
+    expect(fn () => $this->service->generateDockerfile($project, $projectPath))
+        ->toThrow(RuntimeException::class, 'Unsupported PHP extensions required by Composer: ext-custom');
+
+    File::deleteDirectory($projectPath);
+});
+
+test('does not treat built-in PHP extensions as unsupported', function () {
+    $project = Project::factory()->create(['user_id' => $this->user->id]);
+    $projectPath = storage_path('app/test-project');
+    File::ensureDirectoryExists($projectPath);
+    File::put("{$projectPath}/composer.lock", json_encode([
+        'packages' => [[
+            'name' => 'example/package',
+            'require' => ['ext-date' => '*'],
+        ]],
+    ]));
+
+    $dockerfilePath = $this->service->generateDockerfile($project, $projectPath);
+    $content = File::get($dockerfilePath);
+
+    expect($content)
+        ->not->toContain('docker-php-ext-install date')
+        ->toContain('docker-php-ext-install pdo pdo_mysql pdo_pgsql pdo_sqlite mbstring exif pcntl bcmath gd zip sockets intl');
+
+    File::deleteDirectory($projectPath);
+});
+
+test('does not install extensions already provided by the image baseline', function () {
+    $project = Project::factory()->create(['user_id' => $this->user->id]);
+    $projectPath = storage_path('app/test-project');
+    File::ensureDirectoryExists($projectPath);
+    File::put("{$projectPath}/composer.lock", json_encode([
+        'packages' => [[
+            'name' => 'example/package',
+            'require' => [
+                'ext-curl' => '*',
+                'ext-pdo_mysql' => '*',
+                'ext-reflection' => '*',
+            ],
+        ]],
+    ]));
+
+    $dockerfilePath = $this->service->generateDockerfile($project, $projectPath);
+    $content = File::get($dockerfilePath);
+
+    expect($content)
+        ->not->toContain('docker-php-ext-install curl')
+        ->not->toContain('docker-php-ext-install reflection')
+        ->toContain('docker-php-ext-install pdo pdo_mysql pdo_pgsql pdo_sqlite mbstring exif pcntl bcmath gd zip sockets intl');
 
     File::deleteDirectory($projectPath);
 });

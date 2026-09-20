@@ -130,14 +130,8 @@
                     <div class="space-y-6">
                         <div>
                             <h2 class="text-xl font-semibold font-display mb-2" style="color: var(--color-on-surface);">{{ __('Configuration') }}</h2>
-                            <p class="text-sm" style="color: var(--color-on-surface-variant);">{{ __('Configure PHP version and domain') }}</p>
+                            <p class="text-sm" style="color: var(--color-on-surface-variant);">{{ __('Configure your domain') }}</p>
                         </div>
-
-                        <flux:select wire:model="php_version" label="{{ __('PHP Version') }}" required>
-                            <option value="8.4">PHP 8.4</option>
-                            <option value="8.3">PHP 8.3</option>
-                            <option value="8.2">PHP 8.2</option>
-                        </flux:select>
 
                         <flux:input
                             wire:model="domain"
@@ -169,6 +163,42 @@
                         </div>
 
                         <div class="space-y-4">
+                            <!-- Resource Limits -->
+                            <div class="rounded-lg p-4" style="background-color: var(--color-surface-container-high);">
+                                <h3 class="font-medium" style="color: var(--color-on-surface);">{{ __('Resource Limits') }}</h3>
+                                <p class="text-sm mt-1 mb-4" style="color: var(--color-on-surface-variant);">
+                                    {{ __('Optional limits for this project. Leave blank to keep the current unlimited behavior.') }}
+                                </p>
+
+                                <div class="grid gap-4 sm:grid-cols-2">
+                                    <flux:input
+                                        wire:model="memory_limit_mb"
+                                        label="{{ __('Maximum RAM (MB)') }}"
+                                        type="number"
+                                        min="128"
+                                        placeholder="{{ $availableResources['memory_mb'] ?? 'Auto' }}"
+                                    />
+                                    <flux:input
+                                        wire:model="storage_limit_gb"
+                                        label="{{ __('Maximum Storage (GB)') }}"
+                                        type="number"
+                                        min="1"
+                                        placeholder="{{ $availableResources['storage_gb'] ?? 'Auto' }}"
+                                    />
+                                </div>
+
+                                <p class="text-sm mt-3" style="color: var(--color-on-surface-variant);">
+                                    {{ __('Detected server capacity:') }}
+                                    {{ $availableResources['memory_mb'] ? number_format($availableResources['memory_mb']) . ' MB RAM' : __('RAM unavailable') }},
+                                    {{ $availableResources['storage_gb'] ? number_format($availableResources['storage_gb']) . ' GB storage' : __('storage unavailable') }}.
+                                </p>
+                                <p class="text-xs mt-1" style="color: var(--color-on-surface-variant);">
+                                    {{ __('Storage limit applies to the container writable layer.') }}
+                                </p>
+                                @error('memory_limit_mb') <flux:error name="memory_limit_mb" /> @enderror
+                                @error('storage_limit_gb') <flux:error name="storage_limit_gb" /> @enderror
+                            </div>
+
                             <!-- Queue Workers -->
                             <div class="rounded-lg p-4" style="background-color: var(--color-surface-container-high);">
                                 <flux:checkbox wire:model.live="queue_enabled" label="{{ __('Enable Queue Workers') }}" />

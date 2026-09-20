@@ -37,6 +37,8 @@ class Project extends Model
         'queue_enabled',
         'queue_connection',
         'queue_workers',
+        'memory_limit_mb',
+        'storage_limit_gb',
         'status',
         'deployment_error',
         'deployed_at',
@@ -51,6 +53,8 @@ class Project extends Model
             'queue_enabled' => 'boolean',
             'github_auto_update' => 'boolean',
             'queue_workers' => 'integer',
+            'memory_limit_mb' => 'integer',
+            'storage_limit_gb' => 'integer',
         ];
     }
 

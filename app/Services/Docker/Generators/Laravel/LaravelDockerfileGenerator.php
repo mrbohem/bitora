@@ -4,22 +4,28 @@ namespace App\Services\Docker\Generators\Laravel;
 
 use App\Models\Project;
 use App\Services\Docker\Octane\OctaneServerStrategyFactory;
+use App\Services\Docker\PhpExtensionResolver;
 
 class LaravelDockerfileGenerator
 {
     public function __construct(
-        private readonly OctaneServerStrategyFactory $octaneStrategies
+        private readonly OctaneServerStrategyFactory $octaneStrategies,
+        private readonly PhpExtensionResolver $phpExtensions
     ) {}
 
     /**
      * Generate Dockerfile template for Laravel applications.
      */
-    public function generate(Project $project): string
+    public function generate(Project $project, ?string $projectPath = null): string
     {
         $phpVersion = $project->php_version ?: '8.4';
         $octaneStrategy = $project->octane_enabled
             ? $this->octaneStrategies->for($project->octane_server)
             : null;
+        $applicationPath = $projectPath === null || ($project->app_path ?: '.') === '.'
+            ? $projectPath
+            : $projectPath.'/'.trim($project->app_path, '/');
+        $requirements = $this->phpExtensions->resolve($applicationPath);
 
         // Base image
         $template = 'FROM '.($octaneStrategy?->baseImage($phpVersion) ?? "php:{$phpVersion}-fpm-alpine")."\n\n";
@@ -38,6 +44,10 @@ class LaravelDockerfileGenerator
         $template .= "    postgresql-dev \\\n";
         $template .= "    sqlite-dev \\\n";
         $template .= "    libzip-dev \\\n";
+        $template .= "    icu-dev \\\n";
+        foreach ($requirements['system_dependencies'] as $dependency) {
+            $template .= "    {$dependency} \\\n";
+        }
         $template .= "    brotli-dev \\\n";
         $template .= "    openssl-dev \\\n";
         $template .= "    nginx \\\n";
@@ -45,9 +55,30 @@ class LaravelDockerfileGenerator
         $template .= "    npm \\\n";
         $template .= "    supervisor\n\n";
 
+        // Make `free` report the container's cgroup memory instead of the host memory.
+        $template .= "# Make memory reporting cgroup-aware\n";
+        $template .= "RUN if command -v free >/dev/null 2>&1; then \\\n";
+        $template .= "        mv \"\$(command -v free)\" /usr/local/bin/free.host; \\\n";
+        $template .= "        printf '%s\\n' '#!/bin/sh' \\\n";
+        $template .= "            'limit_file=/sys/fs/cgroup/memory.max' \\\n";
+        $template .= "            'usage_file=/sys/fs/cgroup/memory.current' \\\n";
+        $template .= "            'if [ ! -r \"\$limit_file\" ]; then exec /usr/local/bin/free.host \"\$@\"; fi' \\\n";
+        $template .= "            'limit=\$(cat \"\$limit_file\")' \\\n";
+        $template .= "            'usage=\$(cat \"\$usage_file\")' \\\n";
+        $template .= "            'if [ \"\$limit\" = max ] || [ -z \"\$limit\" ] || [ -z \"\$usage\" ]; then exec /usr/local/bin/free.host \"\$@\"; fi' \\\n";
+        $template .= "            'awk -v total=\"\$limit\" -v used=\"\$usage\" '\\''BEGIN { print \"              total        used        free      shared  buff/cache   available\"; printf \"Mem: %12.1fM %11.1fM %11.1fM %11.1fM %11.1fM %11.1fM\", total/1048576, used/1048576, (total-used)/1048576, 0, 0, (total-used)/1048576; print \"\"; print \"Swap:              0B          0B          0B\" }'\\''' \\\n";
+        $template .= "            > /usr/local/bin/free.cgroup; \\\n";
+        $template .= "        chmod +x /usr/local/bin/free.cgroup; \\\n";
+        $template .= "        mv /usr/local/bin/free.cgroup /usr/local/bin/free; \\\n";
+        $template .= "    fi\n\n";
+
         // PHP extensions
         $template .= "# Install PHP extensions\n";
-        $template .= "RUN docker-php-ext-install pdo pdo_mysql pdo_pgsql pdo_sqlite mbstring exif pcntl bcmath gd zip sockets\n\n";
+        $extensions = array_values(array_unique([
+            'pdo', 'pdo_mysql', 'pdo_pgsql', 'pdo_sqlite', 'mbstring', 'exif',
+            'pcntl', 'bcmath', 'gd', 'zip', 'sockets', 'intl', ...$requirements['extensions'],
+        ]));
+        $template .= 'RUN docker-php-ext-install '.implode(' ', $extensions)."\n\n";
 
         // Redis extension for queues
         if ($project->queue_enabled) {
@@ -76,7 +107,8 @@ class LaravelDockerfileGenerator
 
         // Composer dependencies
         $template .= "# Install dependencies\n";
-        $template .= "RUN composer install --no-dev --optimize-autoloader --no-interaction\n\n";
+        $template .= "RUN git config --global --add safe.directory /var/www/html \\\n";
+        $template .= "    && composer install --no-dev --no-plugins --optimize-autoloader --no-interaction\n\n";
 
         if ($octaneStrategy) {
             $template .= $octaneStrategy->dependencySetup();

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Project;
+use App\Services\Contracts\ContainerCommandExecutor;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 
@@ -36,6 +37,22 @@ class GitService
         if ($result->failed()) {
             throw new \RuntimeException("Failed to pull repository: {$result->errorOutput()}");
         }
+    }
+
+    /**
+     * Pull the latest repository changes from inside the running application container.
+     */
+    public function pullRepositoryInContainer(
+        Project $project,
+        ContainerCommandExecutor $containerCommandExecutor
+    ): void {
+        $branch = escapeshellarg($project->git_branch ?? 'main');
+        $command = sprintf(
+            'sh -c %s',
+            escapeshellarg("cd /var/www/html && git pull origin {$branch}")
+        );
+
+        $containerCommandExecutor->execCommand($project, $command);
     }
 
     /**

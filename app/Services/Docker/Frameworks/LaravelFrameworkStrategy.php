@@ -16,9 +16,9 @@ class LaravelFrameworkStrategy implements FrameworkStrategyInterface
         private readonly LaravelSupervisorGenerator $supervisorGenerator
     ) {}
 
-    public function generateDockerfile(Project $project): string
+    public function generateDockerfile(Project $project, ?string $projectPath = null): string
     {
-        return $this->dockerfileGenerator->generate($project);
+        return $this->dockerfileGenerator->generate($project, $projectPath);
     }
 
     public function generateNginxConfig(Project $project): array
