@@ -185,6 +185,14 @@
                                         min="1"
                                         placeholder="{{ $availableResources['storage_gb'] ?? 'Auto' }}"
                                     />
+                                    <flux:input
+                                        wire:model="cpu_limit_cores"
+                                        label="{{ __('Maximum CPU (cores)') }}"
+                                        type="number"
+                                        min="0.01"
+                                        step="0.01"
+                                        placeholder="{{ __('Unlimited') }}"
+                                    />
                                 </div>
 
                                 <p class="text-sm mt-3" style="color: var(--color-on-surface-variant);">
@@ -197,6 +205,7 @@
                                 </p>
                                 @error('memory_limit_mb') <flux:error name="memory_limit_mb" /> @enderror
                                 @error('storage_limit_gb') <flux:error name="storage_limit_gb" /> @enderror
+                                @error('cpu_limit_cores') <flux:error name="cpu_limit_cores" /> @enderror
                             </div>
 
                             <!-- Queue Workers -->

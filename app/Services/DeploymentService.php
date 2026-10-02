@@ -49,6 +49,7 @@ class DeploymentService
             'queue_workers' => $data['queue_workers'] ?? 1,
             'memory_limit_mb' => $data['memory_limit_mb'] ?? null,
             'storage_limit_gb' => $data['storage_limit_gb'] ?? null,
+            'cpu_limit_cores' => $data['cpu_limit_cores'] ?? null,
             'status' => 'pending',
         ]);
 

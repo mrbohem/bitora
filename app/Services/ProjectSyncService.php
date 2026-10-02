@@ -9,18 +9,25 @@ class ProjectSyncService
     public function __construct(
         private readonly GitService $gitService,
         private readonly ContainerManagementService $containerService,
-        private readonly DeploymentService $deploymentService,
     ) {}
 
     public function sync(Project $project): void
     {
+        $containerId = $this->containerService->getContainerId($project);
+
+        if ($containerId === null) {
+            throw new \RuntimeException('Container not found');
+        }
+
+        if ($containerId !== $project->container_id) {
+            $project->update(['container_id' => $containerId]);
+        }
+
         $this->gitService->pullRepositoryInContainer($project, $this->containerService);
-        $this->containerService->restartContainer(
-            $project,
-            $this->deploymentService->getProjectPath($project),
-        );
+        $containerId = $this->containerService->restartContainerInPlace($project);
 
         $project->update([
+            'container_id' => $containerId,
             'status' => 'active',
             'deployment_error' => null,
         ]);

@@ -1,12 +1,16 @@
 <?php
 
 use App\Jobs\DeployProjectJob;
+use App\Livewire\Projects\Deploy;
 use App\Models\Project;
 use App\Models\User;
 use App\Services\ContainerManagementService;
+use App\Services\ContainerResourceService;
 use App\Services\DeploymentService;
+use App\Services\ProjectRuntimeDetector;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
+use Livewire\Livewire;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -83,10 +87,40 @@ test('project creation stores configured resource limits', function () {
         'name' => 'Limited Project',
         'memory_limit_mb' => 512,
         'storage_limit_gb' => 10,
+        'cpu_limit_cores' => 0.23,
     ]);
 
     expect($project->memory_limit_mb)->toBe(512)
-        ->and($project->storage_limit_gb)->toBe(10);
+        ->and($project->storage_limit_gb)->toBe(10)
+        ->and($project->cpu_limit_cores)->toBe('0.23');
+});
+
+test('deploy accepts fractional cpu limits and rejects more than two decimal places', function () {
+    $containerService = Mockery::mock(ContainerManagementService::class);
+    $containerService->shouldReceive('getAvailableResources')->andReturn([
+        'memory_mb' => 4096,
+        'storage_gb' => 100,
+    ]);
+    $this->app->instance(ContainerManagementService::class, $containerService);
+
+    $resourceService = Mockery::mock(ContainerResourceService::class);
+    $resourceService->shouldReceive('validateLimits')->once()->andReturn([]);
+    $this->app->instance(ContainerResourceService::class, $resourceService);
+
+    Livewire::actingAs($this->user)
+        ->test(Deploy::class)
+        ->set('step', 3)
+        ->set('cpu_limit_cores', '0.23')
+        ->call('nextStep')
+        ->assertSet('step', 4)
+        ->assertHasNoErrors();
+
+    Livewire::actingAs($this->user)
+        ->test(Deploy::class)
+        ->set('step', 3)
+        ->set('cpu_limit_cores', '0.234')
+        ->call('nextStep')
+        ->assertHasErrors(['cpu_limit_cores']);
 });
 
 test('git credentials are encrypted in database', function () {
@@ -167,15 +201,12 @@ test('deploy job enables Octane when the application requires it', function () {
     ]));
     File::put("{$projectPath}/.env.example", "APP_NAME=Laravel\n");
 
-    $job = new DeployProjectJob($project, []);
-    $method = new ReflectionMethod($job, 'detectApplicationFeatures');
-    $method->setAccessible(true);
-    $method->invoke($job, $projectPath);
+    app(ProjectRuntimeDetector::class)->detect($project, $projectPath);
 
     expect($project->fresh()->octane_enabled)->toBeTrue();
     expect($project->fresh()->octane_server)->toBe('swoole');
     expect($project->fresh()->reverb_enabled)->toBeTrue();
-    expect($project->fresh()->php_version)->toBe('8.4');
+    expect($project->fresh()->php_version)->toBe('8.5');
 
     File::deleteDirectory($projectPath);
 });
@@ -193,10 +224,7 @@ test('deploy job detects RoadRunner from the application environment example', f
     ]));
     File::put("{$projectPath}/.env.example", "OCTANE_SERVER=roadrunner\n");
 
-    $job = new DeployProjectJob($project, []);
-    $method = new ReflectionMethod($job, 'detectApplicationFeatures');
-    $method->setAccessible(true);
-    $method->invoke($job, $projectPath);
+    app(ProjectRuntimeDetector::class)->detect($project, $projectPath);
 
     expect($project->fresh()->octane_enabled)->toBeTrue();
     expect($project->fresh()->octane_server)->toBe('roadrunner');
@@ -217,10 +245,7 @@ test('deploy job detects FrankenPHP from the application environment example', f
     ]));
     File::put("{$projectPath}/.env.example", "OCTANE_SERVER=frankenphp\n");
 
-    $job = new DeployProjectJob($project, []);
-    $method = new ReflectionMethod($job, 'detectApplicationFeatures');
-    $method->setAccessible(true);
-    $method->invoke($job, $projectPath);
+    app(ProjectRuntimeDetector::class)->detect($project, $projectPath);
 
     expect($project->fresh()->octane_enabled)->toBeTrue();
     expect($project->fresh()->octane_server)->toBe('frankenphp');
@@ -242,15 +267,12 @@ test('deploy job leaves standard PHP-FPM enabled when Octane is absent', functio
     ]));
     File::put("{$projectPath}/.env.example", "APP_NAME=Laravel\n");
 
-    $job = new DeployProjectJob($project, []);
-    $method = new ReflectionMethod($job, 'detectApplicationFeatures');
-    $method->setAccessible(true);
-    $method->invoke($job, $projectPath);
+    app(ProjectRuntimeDetector::class)->detect($project, $projectPath);
 
     expect($project->fresh()->octane_enabled)->toBeFalse();
     expect($project->fresh()->octane_server)->toBeNull();
     expect($project->fresh()->reverb_enabled)->toBeFalse();
-    expect($project->fresh()->php_version)->toBe('8.4');
+    expect($project->fresh()->php_version)->toBe('8.5');
 
     File::deleteDirectory($projectPath);
 });
@@ -272,10 +294,7 @@ test('deploy job selects a PHP version supported by the locked dependency graph'
         ]],
     ]));
 
-    $job = new DeployProjectJob($project, []);
-    $method = new ReflectionMethod($job, 'detectApplicationFeatures');
-    $method->setAccessible(true);
-    $method->invoke($job, $projectPath);
+    app(ProjectRuntimeDetector::class)->detect($project, $projectPath);
 
     expect($project->fresh()->php_version)->toBe('8.1');
 

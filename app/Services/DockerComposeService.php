@@ -37,7 +37,7 @@ class DockerComposeService
                     'container_name' => $containerName,
                     'restart' => 'unless-stopped',
                     'working_dir' => '/var/www/html',
-                    'ports' => ['80'],
+                    'ports' => [$project->port ? "{$project->port}:80" : '80'],
                     'networks' => [$traefikNetwork, 'default'],
                     'labels' => $this->getTraefikLabels($project),
                 ],
@@ -62,6 +62,10 @@ class DockerComposeService
             $compose['services']['app']['storage_opt'] = [
                 'size' => "{$project->storage_limit_gb}G",
             ];
+        }
+
+        if ($project->cpu_limit_cores !== null) {
+            $compose['services']['app']['cpus'] = $project->cpu_limit_cores;
         }
 
         return $this->arrayToYaml($compose);

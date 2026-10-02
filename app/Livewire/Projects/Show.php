@@ -7,10 +7,14 @@ use App\Models\CronJob;
 use App\Models\EnvironmentVariable;
 use App\Models\Project;
 use App\Services\ContainerManagementService;
+use App\Services\ContainerResourceService;
 use App\Services\DeploymentService;
 use App\Services\EnvironmentService;
+use App\Services\ProjectContainerService;
+use App\Services\ProjectSettingsService;
 use App\Services\ProjectSyncService;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -27,6 +31,10 @@ class Show extends Component
 
     public $deploymentProgress = 0;
 
+    public ?string $syncMessage = null;
+
+    public bool $syncFailed = false;
+
     // Cron tab
     public $cronSchedule = '';
 
@@ -42,6 +50,31 @@ class Show extends Component
     public $showEnvModal = false;
 
     public bool $showDeleteModal = false;
+
+    public bool $showSettingsModal = false;
+
+    public string $settingsName = '';
+
+    public string $settingsDomain = '';
+
+    public string $settingsGitBranch = '';
+
+    public bool $settingsQueueEnabled = false;
+
+    public string $settingsQueueConnection = 'redis';
+
+    public int $settingsQueueWorkers = 1;
+
+    public ?int $settingsMemoryLimitMb = null;
+
+    public ?int $settingsStorageLimitGb = null;
+
+    public ?string $settingsCpuLimitCores = null;
+
+    public array $availableResources = [
+        'memory_mb' => null,
+        'storage_gb' => null,
+    ];
 
     public string $projectNameConfirmation = '';
 
@@ -64,6 +97,7 @@ class Show extends Component
         $this->project = $project;
         $this->deploymentStatus = $project->status;
         $this->deploymentProgress = cache()->get("deployment.{$project->id}.progress", 0);
+        $this->loadSettings();
 
         // Sync .env file to database on page load
         $this->syncEnvFromFile($environmentService);
@@ -91,13 +125,10 @@ class Show extends Component
         $this->project->refresh();
     }
 
-    public function startProject(ContainerManagementService $containerService, DeploymentService $deploymentService)
+    public function startProject(ProjectContainerService $projectContainerService)
     {
         try {
-            $projectPath = $deploymentService->getProjectPath($this->project);
-            $containerService->startContainer($this->project, $projectPath);
-
-            $this->project->update(['status' => 'active']);
+            $this->project = $projectContainerService->start($this->project);
 
             $this->dispatch('notify', message: 'Project started successfully!', type: 'success');
         } catch (\Exception $e) {
@@ -119,11 +150,11 @@ class Show extends Component
         }
     }
 
-    public function restartProject(ContainerManagementService $containerService, DeploymentService $deploymentService)
-    {
+    public function restartProject(
+        ProjectContainerService $projectContainerService,
+    ) {
         try {
-            $projectPath = $deploymentService->getProjectPath($this->project);
-            $containerService->restartContainer($this->project, $projectPath);
+            $this->project = $projectContainerService->restart($this->project);
 
             $this->dispatch('notify', message: 'Project restarted successfully!', type: 'success');
         } catch (\Exception $e) {
@@ -217,18 +248,28 @@ class Show extends Component
 
     public function syncFromGitHub(ProjectSyncService $projectSyncService): void
     {
+        $this->syncMessage = null;
+        $this->syncFailed = false;
+
         if (blank($this->project->git_repo)) {
-            $this->dispatch('notify', message: 'This project is not connected to a GitHub repository.', type: 'error');
+            $this->syncMessage = 'This project is not connected to a GitHub repository.';
+            $this->syncFailed = true;
 
             return;
         }
 
         try {
             $projectSyncService->sync($this->project);
+            $this->deploymentStatus = 'active';
+            $this->syncMessage = 'GitHub code synced and project restarted successfully!';
 
-            $this->dispatch('notify', message: 'GitHub code synced successfully!', type: 'success');
+            $this->dispatch('notify', message: $this->syncMessage, type: 'success');
         } catch (\Throwable $e) {
             $this->project->update(['status' => 'failed', 'deployment_error' => $e->getMessage()]);
+            $this->deploymentStatus = 'failed';
+            $this->syncMessage = 'GitHub sync failed: '.$e->getMessage();
+            $this->syncFailed = true;
+
             $this->dispatch('notify', message: 'GitHub sync failed: '.$e->getMessage(), type: 'error');
         }
     }
@@ -237,6 +278,81 @@ class Show extends Component
     {
         $this->project->update(['github_auto_update' => ! $this->project->github_auto_update]);
         $this->dispatch('notify', message: 'GitHub auto-update '.($this->project->github_auto_update ? 'enabled' : 'disabled').'.', type: 'success');
+    }
+
+    public function openSettings(): void
+    {
+        $this->loadAvailableResources();
+        $this->loadSettings();
+        $this->showSettingsModal = true;
+    }
+
+    public function saveSettings(ProjectSettingsService $settingsService, ContainerResourceService $resourceService): void
+    {
+        abort_unless($this->project->user_id === auth()->id(), 403);
+        $this->loadAvailableResources();
+        $this->settingsCpuLimitCores = blank($this->settingsCpuLimitCores) ? null : $this->settingsCpuLimitCores;
+
+        $validated = $this->validate([
+            'settingsName' => ['required', 'string', 'max:255'],
+            'settingsDomain' => ['nullable', 'string', 'max:255'],
+            'settingsGitBranch' => ['required', 'string', 'max:255'],
+            'settingsQueueEnabled' => ['boolean'],
+            'settingsQueueConnection' => ['nullable', 'required_if:settingsQueueEnabled,true', 'string', 'max:50'],
+            'settingsQueueWorkers' => ['required', 'integer', 'min:1', 'max:10'],
+            'settingsMemoryLimitMb' => ['nullable', 'integer', 'min:128'],
+            'settingsStorageLimitGb' => ['nullable', 'integer', 'min:1'],
+            'settingsCpuLimitCores' => ['nullable', 'numeric', 'decimal:0,2', 'min:0.01'],
+        ]);
+
+        $resourceErrors = $resourceService->validateLimits(
+            $validated['settingsMemoryLimitMb'],
+            $validated['settingsStorageLimitGb'],
+            $this->availableResources,
+        );
+
+        if ($resourceErrors !== []) {
+            throw ValidationException::withMessages($resourceErrors);
+        }
+
+        try {
+            $this->project = $settingsService->update($this->project, auth()->user(), [
+                'name' => $validated['settingsName'],
+                'domain' => $validated['settingsDomain'] ?: null,
+                'git_branch' => $validated['settingsGitBranch'],
+                'queue_enabled' => $validated['settingsQueueEnabled'],
+                'queue_connection' => $validated['settingsQueueConnection'] ?: 'redis',
+                'queue_workers' => $validated['settingsQueueWorkers'],
+                'memory_limit_mb' => $validated['settingsMemoryLimitMb'],
+                'storage_limit_gb' => $validated['settingsStorageLimitGb'],
+                'cpu_limit_cores' => $validated['settingsCpuLimitCores'],
+            ]);
+
+            $this->showSettingsModal = false;
+            $this->dispatch('notify', message: 'Project settings saved successfully!', type: 'success');
+        } catch (\Throwable $e) {
+            $this->addError('settings', 'Settings could not be applied: '.$e->getMessage());
+        }
+    }
+
+    private function loadSettings(): void
+    {
+        $this->settingsName = $this->project->name;
+        $this->settingsDomain = $this->project->domain ?? '';
+        $this->settingsGitBranch = $this->project->git_branch ?? 'main';
+        $this->settingsQueueEnabled = (bool) $this->project->queue_enabled;
+        $this->settingsQueueConnection = $this->project->queue_connection ?? 'redis';
+        $this->settingsQueueWorkers = $this->project->queue_workers ?? 1;
+        $this->settingsMemoryLimitMb = $this->project->memory_limit_mb;
+        $this->settingsStorageLimitGb = $this->project->storage_limit_gb;
+        $this->settingsCpuLimitCores = $this->project->cpu_limit_cores;
+    }
+
+    private function loadAvailableResources(): void
+    {
+        if ($this->availableResources['memory_mb'] === null && $this->availableResources['storage_gb'] === null) {
+            $this->availableResources = app(ContainerManagementService::class)->getAvailableResources($this->project);
+        }
     }
 
     #[Computed]
