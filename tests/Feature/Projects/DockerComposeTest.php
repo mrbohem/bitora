@@ -109,6 +109,7 @@ test('generated docker compose includes configured resource limits', function ()
         'user_id' => $this->user->id,
         'memory_limit_mb' => 512,
         'storage_limit_gb' => 10,
+        'cpu_limit_cores' => 0.23,
     ]);
 
     $projectPath = storage_path('app/test-project-resource-limits');
@@ -120,7 +121,8 @@ test('generated docker compose includes configured resource limits', function ()
     expect($content)
         ->toContain('mem_limit: 512m')
         ->toContain('memswap_limit: 512m')
-        ->toContain("storage_opt:\n      size: 10G");
+        ->toContain("storage_opt:\n      size: 10G")
+        ->toContain('cpus: 0.23');
 
     File::deleteDirectory($projectPath);
 });
@@ -137,7 +139,8 @@ test('generated docker compose keeps resource limits unset by default', function
     expect($content)
         ->not->toContain('mem_limit:')
         ->not->toContain('memswap_limit:')
-        ->not->toContain('storage_opt:');
+        ->not->toContain('storage_opt:')
+        ->not->toContain('cpus:');
 
     File::deleteDirectory($projectPath);
 });

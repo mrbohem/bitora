@@ -25,9 +25,13 @@
 
         <!-- Action Buttons -->
         <div class="flex flex-wrap gap-2">
+            <flux:button wire:click="openSettings" icon="cog-6-tooth" size="sm">
+                {{ __('Settings') }}
+            </flux:button>
             @if($project->git_repo)
-                <flux:button wire:click="syncFromGitHub" size="sm" variant="primary">
-                    {{ __('Sync from GitHub') }}
+                <flux:button wire:click="syncFromGitHub" wire:target="syncFromGitHub" size="sm" variant="primary">
+                    <span wire:loading.remove wire:target="syncFromGitHub">{{ __('Sync from GitHub') }}</span>
+                    <span wire:loading wire:target="syncFromGitHub">{{ __('Syncing...') }}</span>
                 </flux:button>
                 <flux:button wire:click="toggleGitHubAutoUpdate" size="sm" :variant="$project->github_auto_update ? 'filled' : 'ghost'">
                     {{ $project->github_auto_update ? __('Disable Auto Update') : __('Enable Auto Update') }}
@@ -51,6 +55,14 @@
         </div>
     </div>
 
+    @if($syncMessage)
+        <div wire:loading.remove wire:target="syncFromGitHub" role="{{ $syncFailed ? 'alert' : 'status' }}" aria-live="{{ $syncFailed ? 'assertive' : 'polite' }}">
+            <x-alert :variant="$syncFailed ? 'danger' : 'success'">
+                {{ $syncMessage }}
+            </x-alert>
+        </div>
+    @endif
+
     <flux:modal wire:model="showDeleteModal" name="delete-project" class="max-w-lg">
         <form wire:submit="deleteProject" class="space-y-6">
             <div>
@@ -72,6 +84,41 @@
                     <flux:button type="button" variant="ghost">{{ __('Cancel') }}</flux:button>
                 </flux:modal.close>
                 <flux:button type="submit" variant="danger">{{ __('Delete permanently') }}</flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    <flux:modal wire:model="showSettingsModal" name="project-settings" class="max-w-2xl">
+        <form wire:submit="saveSettings" class="space-y-6">
+            <div>
+                <flux:heading size="lg">{{ __('Project Settings') }}</flux:heading>
+                <flux:subheading>{{ __('Changes to running projects recreate the container with the new configuration.') }}</flux:subheading>
+            </div>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+                <flux:input wire:model="settingsName" label="{{ __('Project Name') }}" required />
+                <flux:input wire:model="settingsDomain" label="{{ __('Domain') }}" placeholder="app.example.com" />
+                <flux:input wire:model="settingsGitBranch" label="{{ __('Git Branch') }}" required />
+                <flux:select wire:model="settingsQueueConnection" label="{{ __('Queue Connection') }}">
+                    <option value="redis">Redis</option>
+                    <option value="database">Database</option>
+                    <option value="sync">Sync</option>
+                </flux:select>
+                <flux:input wire:model="settingsMemoryLimitMb" type="number" label="{{ __('Memory Limit (MB)') }}" min="128" placeholder="Unlimited" />
+                <flux:input wire:model="settingsStorageLimitGb" type="number" label="{{ __('Storage Limit (GB)') }}" min="1" placeholder="Unlimited" />
+                <flux:input wire:model="settingsCpuLimitCores" type="number" label="{{ __('CPU Limit (cores)') }}" min="0.01" step="0.01" placeholder="Unlimited" />
+                <flux:input wire:model="settingsQueueWorkers" type="number" label="{{ __('Queue Workers') }}" min="1" max="10" />
+            </div>
+
+            <flux:checkbox wire:model="settingsQueueEnabled" label="{{ __('Enable Queue Workers') }}" />
+
+            @error('settings')
+                <x-alert variant="danger">{{ $message }}</x-alert>
+            @enderror
+
+            <div class="flex justify-end gap-2">
+                <flux:button type="button" wire:click="$set('showSettingsModal', false)" variant="ghost">{{ __('Cancel') }}</flux:button>
+                <flux:button type="submit" variant="primary">{{ __('Save Settings') }}</flux:button>
             </div>
         </form>
     </flux:modal>
@@ -124,7 +171,7 @@
     @endif
 
     <!-- Deployment Failed Alert -->
-    @if($deploymentStatus === 'failed' && $project->deployment_error)
+    @if($deploymentStatus === 'failed' && $project->deployment_error && ! $syncMessage)
         <x-alert variant="danger">
             <strong>{{ __('Deployment Failed:') }}</strong> {{ $project->deployment_error }}
         </x-alert>
@@ -217,7 +264,7 @@
                                 <span class="font-mono text-sm" style="color: var(--color-on-surface);">{{ $this->containerStats['memory_usage'] ?? 'N/A' }}</span>
                             </div>
                             <div class="flex items-center justify-between">
-                                <span class="text-sm" style="color: var(--color-on-surface-variant);">{{ __('Storage Usage / Limit') }}</span>
+                                <span class="text-sm" style="color: var(--color-on-surface-variant);">{{ __('Project Storage Usage / Limit') }}</span>
                                 <span class="font-mono text-sm" style="color: var(--color-on-surface);">
                                     {{ $this->containerStats['storage_usage'] ?? 'N/A' }} / {{ $this->containerStats['storage_limit'] ?? 'Unlimited' }}
                                 </span>

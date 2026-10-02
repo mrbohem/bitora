@@ -39,6 +39,8 @@ class Deploy extends Component
 
     public $storage_limit_gb;
 
+    public $cpu_limit_cores;
+
     public array $availableResources = [
         'memory_mb' => null,
         'storage_gb' => null,
@@ -94,6 +96,8 @@ class Deploy extends Component
 
     public function deploy(DeploymentService $deploymentService, ContainerResourceService $resourceService)
     {
+        $this->normalizeCpuLimit();
+
         $validated = $this->validate([
             'name' => ['required', 'string', 'max:255'],
             'git_repo' => ['nullable', 'url'],
@@ -107,6 +111,7 @@ class Deploy extends Component
             'queue_workers' => ['nullable', 'integer', 'min:1', 'max:10'],
             'memory_limit_mb' => ['nullable', 'integer', 'min:128'],
             'storage_limit_gb' => ['nullable', 'integer', 'min:1'],
+            'cpu_limit_cores' => ['nullable', 'numeric', 'decimal:0,2', 'min:0.01'],
             'env_variables' => ['nullable', 'array'],
         ]);
 
@@ -130,6 +135,10 @@ class Deploy extends Component
 
     public function validateCurrentStep(ContainerResourceService $resourceService): void
     {
+        if ($this->step === 3) {
+            $this->normalizeCpuLimit();
+        }
+
         $rules = match ($this->step) {
             1 => [
                 'name' => ['required', 'string', 'max:255'],
@@ -147,6 +156,7 @@ class Deploy extends Component
                 'queue_workers' => ['nullable', 'integer', 'min:1', 'max:10'],
                 'memory_limit_mb' => ['nullable', 'integer', 'min:128'],
                 'storage_limit_gb' => ['nullable', 'integer', 'min:1'],
+                'cpu_limit_cores' => ['nullable', 'numeric', 'decimal:0,2', 'min:0.01'],
             ],
             default => [],
         };
@@ -172,6 +182,13 @@ class Deploy extends Component
 
         if ($errors !== []) {
             throw ValidationException::withMessages($errors);
+        }
+    }
+
+    private function normalizeCpuLimit(): void
+    {
+        if (blank($this->cpu_limit_cores)) {
+            $this->cpu_limit_cores = null;
         }
     }
 

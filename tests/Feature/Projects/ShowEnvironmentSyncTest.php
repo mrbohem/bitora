@@ -235,7 +235,7 @@ test('terminal preserves carriage returns for keyboard input', function () {
         ->assertJson(['ok' => true]);
 });
 
-test('manual github sync pulls latest code and restarts the app', function () {
+test('manual github sync pulls latest code and restarts the project', function () {
     $this->project->update([
         'git_repo' => 'https://github.com/test/repo.git',
         'git_branch' => 'main',
@@ -259,7 +259,40 @@ test('manual github sync pulls latest code and restarts the app', function () {
     Livewire::actingAs($this->user)
         ->test(Show::class, ['project' => $this->project])
         ->call('syncFromGitHub')
-        ->assertDispatched('notify');
+        ->assertSet('syncMessage', 'GitHub code synced and project restarted successfully!')
+        ->assertSet('syncFailed', false)
+        ->assertSee('GitHub code synced and project restarted successfully!');
+});
+
+test('manual github sync displays its failure reason', function () {
+    $this->project->update([
+        'git_repo' => 'https://github.com/test/repo.git',
+        'domain' => 'example.com',
+        'status' => 'active',
+    ]);
+
+    $projectSyncService = Mockery::mock(ProjectSyncService::class);
+    $projectSyncService->shouldReceive('sync')
+        ->once()
+        ->andThrow(new RuntimeException('Container not found'));
+    $this->app->instance(ProjectSyncService::class, $projectSyncService);
+
+    $containerService = Mockery::mock(ContainerManagementService::class);
+    $containerService->shouldReceive('getContainerStatus')
+        ->andReturn(['status' => 'running', 'running' => true]);
+    $containerService->shouldReceive('getContainerStats')
+        ->andReturn([]);
+    $this->app->instance(ContainerManagementService::class, $containerService);
+
+    Livewire::actingAs($this->user)
+        ->test(Show::class, ['project' => $this->project])
+        ->call('syncFromGitHub')
+        ->assertSet('syncMessage', 'GitHub sync failed: Container not found')
+        ->assertSet('syncFailed', true)
+        ->assertSet('deploymentStatus', 'failed')
+        ->assertSee('GitHub sync failed: Container not found');
+
+    expect($this->project->fresh()->status)->toBe('failed');
 });
 
 test('github webhook auto syncs when enabled', function () {

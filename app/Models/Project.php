@@ -39,6 +39,7 @@ class Project extends Model
         'queue_workers',
         'memory_limit_mb',
         'storage_limit_gb',
+        'cpu_limit_cores',
         'status',
         'deployment_error',
         'deployed_at',
@@ -55,6 +56,7 @@ class Project extends Model
             'queue_workers' => 'integer',
             'memory_limit_mb' => 'integer',
             'storage_limit_gb' => 'integer',
+            'cpu_limit_cores' => 'decimal:2',
         ];
     }
 

@@ -14,8 +14,8 @@ test('container stats resolve the container when the project has no stored conta
         "docker inspect resolved-container --format='{{.HostConfig.Memory}}'" => Process::result(
             output: "536870912\n"
         ),
-        "docker inspect --size resolved-container --format='{{.SizeRw}}'" => Process::result(
-            output: "2097152\n"
+        "docker inspect --size resolved-container --format='{{.SizeRw}}|{{.SizeRootFs}}'" => Process::result(
+            output: "2097152|2097152\n"
         ),
     ]);
 
@@ -49,6 +49,53 @@ test('available resources include Docker memory and host storage', function () {
 
     expect($resources['memory_mb'])->toBe(2048)
         ->and($resources['storage_gb'])->toBeGreaterThanOrEqual(0);
+});
+
+test('available storage excludes limits allocated to other projects', function () {
+    Process::fake([
+        "docker info --format='{{.MemTotal}}'" => Process::result(output: "2147483648\n"),
+    ]);
+
+    $firstProject = Project::factory()->create(['storage_limit_gb' => 4]);
+    Project::factory()->create(['storage_limit_gb' => 3]);
+    $totalStorageGb = (int) floor(disk_total_space(storage_path()) / 1024 / 1024 / 1024);
+
+    $resources = app(ContainerManagementService::class)->getAvailableResources($firstProject);
+
+    expect($resources['storage_gb'])->toBe(max($totalStorageGb - 3, 0));
+});
+
+test('rebuilding a container returns its new container id', function () {
+    Process::fake([
+        'docker-compose up -d --build --force-recreate' => Process::result(),
+        'docker ps -aq -f name=*' => Process::result(output: "new-container-id\n"),
+    ]);
+
+    $project = Project::factory()->create(['slug' => 'rebuild-project']);
+    $projectPath = storage_path('app/projects/rebuild-project');
+    mkdir($projectPath, 0755, true);
+
+    try {
+        $containerId = app(ContainerManagementService::class)->rebuildContainer($project, $projectPath);
+
+        expect($containerId)->toBe('new-container-id');
+    } finally {
+        rmdir($projectPath);
+    }
+});
+
+test('restarting a container in place preserves its container id', function () {
+    Process::fake([
+        "docker restart 'existing-container-id'" => Process::result(output: "existing-container-id\n"),
+    ]);
+
+    $project = Project::factory()->create(['container_id' => 'existing-container-id']);
+
+    $containerId = app(ContainerManagementService::class)->restartContainerInPlace($project);
+
+    expect($containerId)->toBe('existing-container-id');
+
+    Process::assertRan("docker restart 'existing-container-id'");
 });
 
 test('resource limits are rejected when they exceed detected capacity', function () {

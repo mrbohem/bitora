@@ -5,6 +5,7 @@ namespace App\Services\Docker\Generators\Laravel;
 use App\Models\Project;
 use App\Services\Docker\Octane\OctaneServerStrategyFactory;
 use App\Services\Docker\PhpExtensionResolver;
+use Illuminate\Support\Facades\File;
 
 class LaravelDockerfileGenerator
 {
@@ -26,13 +27,15 @@ class LaravelDockerfileGenerator
             ? $projectPath
             : $projectPath.'/'.trim($project->app_path, '/');
         $requirements = $this->phpExtensions->resolve($applicationPath);
+        $composerInstallCommand = $this->composerInstallCommand($applicationPath);
 
         // Base image
         $template = 'FROM '.($octaneStrategy?->baseImage($phpVersion) ?? "php:{$phpVersion}-fpm-alpine")."\n\n";
 
         // System dependencies
         $template .= "# Install system dependencies\n";
-        $template .= "RUN apk add --no-cache \\\n";
+        $template .= "RUN for attempt in 1 2 3; do \\\n";
+        $template .= "    apk add --no-cache \\\n";
         $template .= "    linux-headers \\\n";
         $template .= "    git \\\n";
         $template .= "    curl \\\n";
@@ -53,7 +56,12 @@ class LaravelDockerfileGenerator
         $template .= "    nginx \\\n";
         $template .= "    nodejs \\\n";
         $template .= "    npm \\\n";
-        $template .= "    supervisor\n\n";
+        $template .= "    supervisor \\\n";
+        $template .= "    && exit 0; \\\n";
+        $template .= "    echo \"apk package installation failed (attempt \$attempt/3), retrying...\" >&2; \\\n";
+        $template .= "    sleep 5; \\\n";
+        $template .= "done; \\\n";
+        $template .= "exit 1\n\n";
 
         // Make `free` report the container's cgroup memory instead of the host memory.
         $template .= "# Make memory reporting cgroup-aware\n";
@@ -108,7 +116,7 @@ class LaravelDockerfileGenerator
         // Composer dependencies
         $template .= "# Install dependencies\n";
         $template .= "RUN git config --global --add safe.directory /var/www/html \\\n";
-        $template .= "    && composer install --no-dev --no-plugins --optimize-autoloader --no-interaction\n\n";
+        $template .= "    && {$composerInstallCommand}\n\n";
 
         if ($octaneStrategy) {
             $template .= $octaneStrategy->dependencySetup();
@@ -116,15 +124,16 @@ class LaravelDockerfileGenerator
 
         // Prepare Laravel runtime configuration
         $template .= "# Prepare Laravel runtime\n";
-        $template .= "RUN if [ -f .env.example ] && [ ! -f .env ]; then cp .env.example .env; fi \\\n";
-        $template .= "    && php artisan key:generate --force \\\n";
-        $template .= "    && mkdir -p database \\\n";
+        $template .= "RUN mkdir -p database storage/logs \\\n";
+        $template .= "    && if [ -f .env.example ] && [ ! -f .env ]; then cp .env.example .env; fi \\\n";
+        $template .= "    && (php artisan key:generate --force || echo 'WARNING: Laravel application key generation failed.' | tee -a storage/logs/deployment-warnings.log) \\\n";
         $template .= "    && touch database/database.sqlite \\\n";
-        $template .= "    && if grep -q '^DB_CONNECTION=sqlite' .env; then php artisan migrate --force; fi\n\n";
+        $template .= "    && if [ -f .env ] && grep -q '^DB_CONNECTION=sqlite' .env; then php artisan migrate --force || echo 'WARNING: Laravel database migration failed.' | tee -a storage/logs/deployment-warnings.log; fi \\\n";
+        $template .= "    && (php artisan package:discover --ansi || echo 'WARNING: Laravel package discovery failed. Check deployment-warnings.log.' | tee -a storage/logs/deployment-warnings.log)\n\n";
 
         if ($project->octane_enabled) {
             $template .= "# Install Laravel Octane configuration without changing the source repository\n";
-            $template .= "RUN php artisan octane:install --server={$octaneStrategy->server()->value} --no-interaction\n\n";
+            $template .= "RUN php artisan octane:install --server={$octaneStrategy->server()->value} --no-interaction || echo 'WARNING: Laravel Octane setup failed.' | tee -a storage/logs/deployment-warnings.log\n\n";
         }
 
         // Reverb configuration
@@ -182,5 +191,31 @@ class LaravelDockerfileGenerator
         $template .= "CMD [\"/usr/bin/supervisord\", \"-c\", \"/etc/supervisor/conf.d/supervisord.conf\"]\n";
 
         return $template;
+    }
+
+    private function composerInstallCommand(?string $applicationPath): string
+    {
+        $composerPath = $applicationPath === null ? null : $applicationPath.'/composer.json';
+        $composer = $composerPath !== null && File::exists($composerPath)
+            ? json_decode(File::get($composerPath), true)
+            : [];
+        $lockPath = $applicationPath === null ? null : $applicationPath.'/composer.lock';
+        $lock = $lockPath !== null && File::exists($lockPath)
+            ? json_decode(File::get($lockPath), true)
+            : [];
+        $packages = is_array($lock) ? ($lock['packages'] ?? []) : [];
+        $allowedPlugins = is_array($composer) ? ($composer['config']['allow-plugins'] ?? []) : [];
+
+        $hasLockedComposerPlugin = is_array($packages) && collect($packages)->contains(
+            fn (mixed $package): bool => is_array($package) && ($package['type'] ?? null) === 'composer-plugin'
+        );
+        $hasAllowedComposerPlugin = $allowedPlugins === true
+            || (is_array($allowedPlugins) && collect($allowedPlugins)->contains(fn (mixed $allowed): bool => $allowed === true));
+
+        if ($hasLockedComposerPlugin || $hasAllowedComposerPlugin) {
+            return 'COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --no-scripts --optimize-autoloader --no-interaction';
+        }
+
+        return 'composer install --no-dev --no-plugins --no-scripts --optimize-autoloader --no-interaction';
     }
 }

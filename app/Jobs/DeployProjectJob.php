@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Enums\OctaneServer;
 use App\Events\DeploymentStatusUpdated;
 use App\Models\Project;
 use App\Services\ActivityLogService;
@@ -10,8 +9,7 @@ use App\Services\ContainerManagementService;
 use App\Services\DockerComposeService;
 use App\Services\DockerImageService;
 use App\Services\GitService;
-use Composer\Semver\Constraint\Constraint;
-use Composer\Semver\VersionParser;
+use App\Services\ProjectRuntimeDetector;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -39,6 +37,7 @@ class DeployProjectJob implements ShouldQueue
      */
     public function handle(
         GitService $gitService,
+        ProjectRuntimeDetector $runtimeDetector,
         DockerImageService $dockerImageService,
         DockerComposeService $dockerComposeService,
         ContainerManagementService $containerService,
@@ -54,15 +53,12 @@ class DeployProjectJob implements ShouldQueue
                 $gitService->cloneRepository($this->project, $projectPath);
                 $this->updateProgress(20);
 
-                // Install dependencies
-                $this->updateStatus('installing', 'Installing dependencies...');
-                $this->installDependencies($projectPath);
                 $this->updateProgress(40);
 
                 // Setup environment
                 $applicationPath = $this->getApplicationPath($projectPath);
                 $this->setupEnvironment($applicationPath);
-                $this->detectApplicationFeatures($applicationPath);
+                $runtimeDetector->detect($this->project, $applicationPath);
 
                 // Cleanup SSH key if used
                 if ($this->project->git_auth_type === 'ssh') {
@@ -70,7 +66,7 @@ class DeployProjectJob implements ShouldQueue
                 }
             } else {
                 File::ensureDirectoryExists($projectPath, 0755, true);
-                $this->detectApplicationFeatures($projectPath);
+                $runtimeDetector->detect($this->project, $projectPath);
                 $this->updateProgress(40);
             }
 
@@ -166,14 +162,6 @@ class DeployProjectJob implements ShouldQueue
     }
 
     /**
-     * Install project dependencies
-     */
-    private function installDependencies(string $projectPath): void
-    {
-        // Dependencies will be installed during Docker build
-    }
-
-    /**
      * Setup project environment
      */
     private function setupEnvironment(string $projectPath): void
@@ -214,80 +202,6 @@ class DeployProjectJob implements ShouldQueue
         }
 
         File::put($envPath, $envContent);
-    }
-
-    /**
-     * Detect application features and the PHP version from the application's Composer manifest.
-     */
-    private function detectApplicationFeatures(string $projectPath): void
-    {
-        $composerPath = "{$projectPath}/composer.json";
-        $hasOctane = false;
-        $hasReverb = false;
-        $phpVersion = '8.4';
-
-        if (File::exists($composerPath)) {
-            $composer = json_decode(File::get($composerPath), true, 512, JSON_THROW_ON_ERROR);
-            $dependencies = $composer['require'] ?? [];
-            $hasOctane = array_key_exists('laravel/octane', $dependencies);
-            $hasReverb = array_key_exists('laravel/reverb', $dependencies);
-            $phpVersion = $this->findCompatiblePhpVersion($projectPath, $composer);
-        }
-
-        $envExamplePath = "{$projectPath}/.env.example";
-        $server = File::exists($envExamplePath)
-            ? OctaneServer::fromEnvironment(File::get($envExamplePath))->value
-            : OctaneServer::Swoole->value;
-
-        $this->project->update([
-            'php_version' => $phpVersion,
-            'octane_enabled' => $hasOctane,
-            'octane_server' => $hasOctane ? $server : null,
-            'reverb_enabled' => $hasReverb,
-        ]);
-        $this->project->refresh();
-    }
-
-    /**
-     * Select the newest supported PHP version accepted by the complete locked dependency graph.
-     *
-     * @param  array<string, mixed>  $composer
-     */
-    private function findCompatiblePhpVersion(string $projectPath, array $composer): string
-    {
-        $constraints = [];
-        $rootConstraint = $composer['require']['php'] ?? null;
-
-        if (is_string($rootConstraint)) {
-            $constraints[] = $rootConstraint;
-        }
-
-        $lockPath = "{$projectPath}/composer.lock";
-
-        if (File::exists($lockPath)) {
-            $lock = json_decode(File::get($lockPath), true, 512, JSON_THROW_ON_ERROR);
-
-            foreach ($lock['packages'] ?? [] as $package) {
-                if (is_string($package['require']['php'] ?? null)) {
-                    $constraints[] = $package['require']['php'];
-                }
-            }
-        }
-
-        $parser = new VersionParser;
-        $candidates = ['8.4', '8.3', '8.2', '8.1', '8.0', '7.4'];
-
-        foreach ($candidates as $candidate) {
-            $candidateVersion = new Constraint('==', "{$candidate}.9999999-stable");
-
-            if (collect($constraints)
-                ->map(fn (string $constraint) => $parser->parseConstraints($constraint))
-                ->every(fn ($constraint) => $constraint->matches($candidateVersion))) {
-                return $candidate;
-            }
-        }
-
-        throw new \RuntimeException('No compatible PHP version was found for the application Composer requirements.');
     }
 
     private function getApplicationPath(string $projectPath): string

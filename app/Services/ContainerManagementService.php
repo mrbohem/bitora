@@ -3,13 +3,17 @@
 namespace App\Services;
 
 use App\Models\Project;
+use App\Services\Concerns\InteractsWithDocker;
 use App\Services\Contracts\ContainerCommandExecutor;
 use Illuminate\Support\Facades\Process;
 
 class ContainerManagementService implements ContainerCommandExecutor
 {
+    use InteractsWithDocker;
+
     public function __construct(
-        private readonly ContainerResourceService $resourceService
+        private readonly ContainerResourceService $resourceService,
+        private readonly ProjectStorageService $storageService,
     ) {}
 
     /**
@@ -19,9 +23,7 @@ class ContainerManagementService implements ContainerCommandExecutor
      */
     private function dockerCmd(string $command): string
     {
-        $prefix = config('app.docker_use_sudo', false) ? 'sudo ' : '';
-
-        return $prefix.$command;
+        return $this->dockerCommand($command);
     }
 
     /**
@@ -60,7 +62,7 @@ class ContainerManagementService implements ContainerCommandExecutor
     /**
      * Restart container
      */
-    public function restartContainer(Project $project, string $projectPath): void
+    public function restartContainer(Project $project, string $projectPath): string
     {
         $result = Process::timeout(120)
             ->path($projectPath)
@@ -69,6 +71,57 @@ class ContainerManagementService implements ContainerCommandExecutor
         if ($result->failed()) {
             throw new \RuntimeException("Failed to restart container: {$result->errorOutput()}");
         }
+
+        $containerId = $this->getContainerId($project);
+
+        if ($containerId === null) {
+            throw new \RuntimeException('Container was restarted but its ID could not be determined.');
+        }
+
+        return $containerId;
+    }
+
+    /**
+     * Restart the existing container without replacing its writable layer.
+     */
+    public function restartContainerInPlace(Project $project): string
+    {
+        $containerId = $project->container_id ?? $this->getContainerId($project);
+
+        if ($containerId === null) {
+            throw new \RuntimeException('Container not found');
+        }
+
+        $result = Process::timeout(120)
+            ->run($this->dockerCmd('docker restart '.escapeshellarg($containerId)));
+
+        if ($result->failed()) {
+            throw new \RuntimeException("Failed to restart container: {$result->errorOutput()}");
+        }
+
+        return trim($result->output()) ?: $containerId;
+    }
+
+    /**
+     * Rebuild and restart the project container.
+     */
+    public function rebuildContainer(Project $project, string $projectPath): string
+    {
+        $result = Process::timeout(300)
+            ->path($projectPath)
+            ->run($this->dockerCmd('docker-compose up -d --build --force-recreate'));
+
+        if ($result->failed()) {
+            throw new \RuntimeException("Failed to rebuild container: {$result->errorOutput()}");
+        }
+
+        $containerId = $this->getContainerId($project);
+
+        if ($containerId === null) {
+            throw new \RuntimeException('Container was rebuilt but its ID could not be determined.');
+        }
+
+        return $containerId;
     }
 
     /**
@@ -214,16 +267,15 @@ class ContainerManagementService implements ContainerCommandExecutor
         $memoryLimit = $containerLimitResult->successful() && is_numeric($containerLimitBytes) && (int) $containerLimitBytes > 0
             ? $this->formatBytes((int) $containerLimitBytes)
             : ($project->memory_limit_mb !== null ? "{$project->memory_limit_mb}MB" : null);
-        $storageResult = Process::run($this->dockerCmd("docker inspect --size {$containerId} --format='{{.SizeRw}}'"));
-        $storageBytes = trim($storageResult->output());
+        $storageBytes = $this->storageService->usage($project, $containerId);
 
         return [
             'cpu_percent' => $stats[0] ?? '0%',
             'memory_usage' => $this->formatMemoryUsage($stats[1] ?? '0B', $memoryLimit),
             'network_io' => $stats[2] ?? '0B / 0B',
             'block_io' => $stats[3] ?? '0B / 0B',
-            'storage_usage' => $storageResult->successful() && is_numeric($storageBytes)
-                ? $this->formatBytes((int) $storageBytes)
+            'storage_usage' => is_numeric($storageBytes)
+                ? $this->formatBytes($storageBytes)
                 : 'N/A',
             'storage_limit' => $project->storage_limit_gb !== null
                 ? "{$project->storage_limit_gb}GB"
@@ -285,9 +337,9 @@ class ContainerManagementService implements ContainerCommandExecutor
      *
      * @return array{memory_mb: int|null, storage_gb: int|null}
      */
-    public function getAvailableResources(): array
+    public function getAvailableResources(?Project $exceptProject = null): array
     {
-        return $this->resourceService->availableResources();
+        return $this->resourceService->availableResources($exceptProject);
     }
 
     /**
@@ -302,6 +354,14 @@ class ContainerManagementService implements ContainerCommandExecutor
         }
 
         $result = Process::run($this->dockerCmd("docker port {$containerId} 80"));
+
+        if (($result->failed() || empty(trim($result->output()))) && $project->container_id !== null) {
+            $containerId = $this->getContainerId($project);
+
+            if ($containerId !== null) {
+                $result = Process::run($this->dockerCmd("docker port {$containerId} 80"));
+            }
+        }
 
         if ($result->failed() || empty(trim($result->output()))) {
             return null;

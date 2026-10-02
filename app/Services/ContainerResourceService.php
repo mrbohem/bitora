@@ -2,14 +2,18 @@
 
 namespace App\Services;
 
+use App\Models\Project;
+use App\Services\Concerns\InteractsWithDocker;
 use Illuminate\Support\Facades\Process;
 
 class ContainerResourceService
 {
+    use InteractsWithDocker;
+
     /**
      * @return array{memory_mb: int|null, storage_gb: int|null}
      */
-    public function availableResources(): array
+    public function availableResources(?Project $exceptProject = null): array
     {
         $memoryResult = Process::run($this->dockerCommand("docker info --format='{{.MemTotal}}'"));
         $memoryBytes = trim($memoryResult->output());
@@ -17,12 +21,18 @@ class ContainerResourceService
             ? (int) floor((int) $memoryBytes / 1024 / 1024)
             : null;
 
-        $storageBytes = is_dir(storage_path()) ? disk_free_space(storage_path()) : false;
+        $storageBytes = is_dir(storage_path()) ? disk_total_space(storage_path()) : false;
+        $totalStorageGb = $storageBytes !== false
+            ? (int) floor($storageBytes / 1024 / 1024 / 1024)
+            : null;
+        $allocatedStorageGb = Project::query()
+            ->when($exceptProject !== null, fn ($query) => $query->where($exceptProject->getKeyName(), '!=', $exceptProject->getKey()))
+            ->sum('storage_limit_gb');
 
         return [
             'memory_mb' => $memoryMb,
-            'storage_gb' => $storageBytes !== false
-                ? (int) floor($storageBytes / 1024 / 1024 / 1024)
+            'storage_gb' => $totalStorageGb !== null
+                ? max($totalStorageGb - (int) $allocatedStorageGb, 0)
                 : null,
         ];
     }
@@ -47,10 +57,5 @@ class ContainerResourceService
         }
 
         return $errors;
-    }
-
-    private function dockerCommand(string $command): string
-    {
-        return (config('app.docker_use_sudo', false) ? 'sudo ' : '').$command;
     }
 }
