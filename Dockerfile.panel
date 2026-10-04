@@ -1,5 +1,11 @@
 FROM php:8.4-fpm-alpine
 
+ARG BITORA_VERSION=0.1.1
+ENV BITORA_VERSION=${BITORA_VERSION}
+LABEL org.opencontainers.image.version=${BITORA_VERSION}
+ARG BITORA_IMAGE_REPOSITORY=mrbohem7/bitora
+ENV BITORA_IMAGE_REPOSITORY=${BITORA_IMAGE_REPOSITORY}
+
 # Install system dependencies
 RUN apk add --no-cache \
     linux-headers \
@@ -57,8 +63,6 @@ RUN rm -f public/hot \
 # Laravel setup
 RUN composer dump-autoload --optimize --classmap-authoritative \
     && php artisan key:generate \
-    && php artisan config:cache \
-    && php artisan route:cache \
     && php artisan view:cache
 
 # Create storage directories

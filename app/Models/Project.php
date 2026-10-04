@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Services\ContainerManagementService;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -89,14 +88,12 @@ class Project extends Model
         });
     }
 
+    /**
+     * @return BelongsTo<User, $this>
+     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
-    }
-
-    public function deploymentConfigs(): HasMany
-    {
-        return $this->hasMany(DeploymentConfig::class);
     }
 
     public function cronJobs(): HasMany
@@ -120,7 +117,10 @@ class Project extends Model
     }
 
     /**
-     * Get the public URL for this project
+     * Get the public URL for this project.
+     *
+     * Returns the domain-based URL or port-based URL from stored project data.
+     * For dynamic runtime port detection via Docker, use ContainerManagementService::getExternalUrl().
      */
     public function getUrlAttribute(): ?string
     {
@@ -132,14 +132,10 @@ class Project extends Model
             return 'http://'.$this->domain;
         }
 
-        // Get actual Docker-mapped external port
-        $containerService = app(ContainerManagementService::class);
-        $externalPort = $containerService->getExternalPort($this);
-
-        if ($externalPort) {
+        if ($this->port) {
             $host = request()->getHost();
 
-            return "http://{$host}:{$externalPort}";
+            return "http://{$host}:{$this->port}";
         }
 
         return null;

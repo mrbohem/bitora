@@ -82,5 +82,70 @@
                 </flux:button>
             </div>
         </form>
+
+        <section
+            @if(in_array($updateStatus['status'] ?? 'idle', ['starting', 'pulling', 'restarting']))
+                wire:poll.3s="refreshUpdateStatus"
+            @endif
+            class="mt-6 rounded-lg p-6"
+            style="background-color: var(--color-surface-container); border: 1px solid var(--color-outline-variant);"
+        >
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-semibold font-display" style="color: var(--color-on-surface);">{{ __('Bitora Panel Update') }}</h2>
+                    <p class="mt-2 text-sm" style="color: var(--color-on-surface-variant);">
+                        {{ __('Current version: :version', ['version' => $currentVersion]) }}
+                        @if($latestVersion)
+                            <span class="mx-1">·</span>
+                            {{ __('Latest version: :version', ['version' => $latestVersion]) }}
+                        @endif
+                    </p>
+                    @if($latestVersion)
+                        <p role="status" aria-live="polite" class="mt-1 text-sm" style="color: var(--color-on-surface-variant);">
+                            @if($updateAvailable)
+                                {{ __('Version :version is available.', ['version' => $latestVersion]) }}
+                            @else
+                                {{ __('You are already using the latest version.') }}
+                            @endif
+                        </p>
+                    @elseif(!$updateError)
+                        <p role="status" aria-live="polite" class="mt-1 text-sm" style="color: var(--color-on-surface-variant);">
+                            {{ __('No versioned releases are currently available.') }}
+                        </p>
+                    @endif
+                    <p class="mt-1 text-sm" style="color: var(--color-on-surface-variant);">
+                        {{ __('Updating briefly restarts only the Bitora panel. Deployed project containers are not restarted.') }}
+                    </p>
+                </div>
+
+                @if($updateAvailable && !in_array($updateStatus['status'] ?? 'idle', ['starting', 'pulling', 'restarting']))
+                    <flux:button
+                        type="button"
+                        wire:click="updatePanel"
+                        wire:loading.attr="disabled"
+                        wire:target="updatePanel"
+                        variant="primary"
+                    >
+                        <span wire:loading.remove wire:target="updatePanel">{{ __('Update Panel') }}</span>
+                        <span wire:loading wire:target="updatePanel">{{ __('Preparing update...') }}</span>
+                    </flux:button>
+                @elseif(!in_array($updateStatus['status'] ?? 'idle', ['starting', 'pulling', 'restarting']))
+                    <flux:button type="button" wire:click="checkForUpdates" wire:loading.attr="disabled" wire:target="checkForUpdates">
+                        <span wire:loading.remove wire:target="checkForUpdates">{{ __('Check for Updates') }}</span>
+                        <span wire:loading wire:target="checkForUpdates">{{ __('Checking...') }}</span>
+                    </flux:button>
+                @endif
+            </div>
+
+            @if($updateStatus['message'] ?? false)
+                <p role="status" class="mt-4 text-sm" style="color: var(--color-on-surface-variant);">
+                    {{ $updateStatus['message'] }}
+                </p>
+            @endif
+
+            @if($updateError)
+                <x-alert variant="danger" class="mt-4">{{ $updateError }}</x-alert>
+            @endif
+        </section>
     </div>
 </div>

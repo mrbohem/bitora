@@ -1,59 +1,144 @@
-## Installation
+# Installation
 
-Bitora is a self-hosted Laravel deployment panel. Install it on any Linux server with a single command.
+Lumina is a self-hosted deployment platform. Install it on any Linux server in minutes.
 
 ---
 
 - [Requirements](#requirements)
-- [Quick Install](#quick-install)
-- [Create Admin User](#create-admin-user)
-- [Access the Panel](#access-the-panel)
+- [Production Server Install](#production-install)
+- [Local Development Setup](#local-development)
+- [Local Docker Setup](#local-docker)
+- [Create Admin User](#create-admin)
+- [Access the Panel](#access-panel)
 
 <a name="requirements"></a>
-### Requirements
+## Requirements
 
-- A Linux server (Ubuntu 20.04+ recommended)
-- Port 80 and 443 open in your firewall
-- A user with `sudo` access
+**Server (Production):**
+- Linux server — Ubuntu 22.04 LTS or Debian 12+ recommended
+- Minimum 1 vCPU, 1 GB RAM (2 GB+ recommended for running multiple containers)
+- Port `80` and `443` open in your firewall
+- A user with `sudo` privileges
 
-> {info} Docker and Docker Compose will be installed automatically if not present.
+> {info} Docker and Docker Compose are installed automatically by the installer if not already present.
 
-<a name="quick-install"></a>
-### Quick Install
+**Local Development:**
+- PHP 8.4+
+- Composer 2.x
+- Node.js 20+ and npm
+- Docker Desktop
 
-Run the following command on your server:
+<a name="production-install"></a>
+## Production Server Install
+
+Run the one-line installer on your Linux server:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/yourrepo/bitora/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/mrbohem/bitora/main/install.sh | bash
 ```
 
-This will:
+The installer will:
+1. Install Docker Engine and Docker Compose plugin (if not already installed)
+2. Create the `traefik-network` Docker bridge network
+3. Start the **Traefik** reverse proxy container (listening on ports 80 and 443)
+4. Pull and start the **Lumina panel** container
 
-1. Install Docker and Docker Compose (if not already installed)
-2. Start the Traefik reverse proxy on port 80/443
-3. Create the required Docker network
+After the installer completes, proceed to [Create Admin User](#create-admin).
 
-<a name="create-admin-user"></a>
-### Create Admin User
+<a name="local-development"></a>
+## Local Development Setup (Source)
 
-After installation, create your admin account using the CLI:
+Use this setup for contributing to Lumina or customising the platform:
 
+```bash
+# 1. Clone the repository
+git clone https://github.com/mrbohem/bitora.git lumina
+cd lumina
+
+# 2. Install PHP and JavaScript dependencies
+composer install
+npm install
+
+# 3. Create and configure your environment file
+cp .env.example .env
+php artisan key:generate
+
+# 4. Run database migrations
+php artisan migrate
+
+# 5. Build frontend assets
+npm run build
+
+# 6. Start the development server (Laravel + Vite hot reload)
+composer run dev
+```
+
+The panel will be available at `http://localhost:8000`.
+
+> {warning} The local dev server does not have access to Docker by default. To test full deployment features you need Docker Desktop installed and running with your user having Docker socket access.
+
+<a name="local-docker"></a>
+## Local Docker Setup
+
+To run Lumina inside Docker locally (simulating a production environment):
+
+```bash
+./scripts/start-local.sh
+```
+
+This script will:
+1. Build the local Lumina Docker image
+2. Start the Traefik reverse proxy
+3. Launch the Lumina panel container mounted at port `8080`
+4. Run migrations inside the container automatically
+
+Access the panel at `http://localhost:8080`.
+
+<a name="create-admin"></a>
+## Create Admin User
+
+After installation, create your admin account using the built-in Artisan command:
+
+**For local development:**
 ```bash
 php artisan admin:create
 ```
 
-You will be prompted for:
-- Name
-- Email
-- Password
+**For Docker installs:**
+```bash
+docker exec -it bitora-panel php artisan admin:create
+```
 
-<a name="access-the-panel"></a>
-### Access the Panel
+You will be prompted for:
+- **Name** — your display name
+- **Email** — your login email
+- **Password** — minimum 8 characters
+- **Confirm Password** — must match
+
+```
+Creating admin user for Bitora...
+
+ Admin name: John Doe
+ Admin email: john@example.com
+ Admin password:
+ Confirm password:
+
+Admin user 'John Doe' created successfully!
+Email: john@example.com
+```
+
+<a name="access-panel"></a>
+## Access the Panel
 
 Open your browser and visit:
 
-```
-http://YOUR_SERVER_IP/
-```
+| Install Type | URL |
+|---|---|
+| Local development | `http://localhost:8000` |
+| Local Docker | `http://localhost:8080` |
+| Production (no domain) | `http://YOUR_SERVER_IP` |
+| Production (with domain) | `http://yourdomain.com` |
 
-Log in with the credentials you created above.
+Log in with the credentials you created in the step above.
+
+> {info} Once logged in, head to [Deploy a Project](/{{route}}/{{version}}/deploy-project) to get started.

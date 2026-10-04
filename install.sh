@@ -189,6 +189,7 @@ echo ""
 # Pull and start Bitora panel
 echo -e "${YELLOW}Setting up Bitora panel...${NC}"
 BITORA_IMAGE="${BITORA_IMAGE:-mrbohem7/bitora:latest}"
+BITORA_IMAGE_REPOSITORY="${BITORA_IMAGE%:*}"
 BITORA_PORT="${BITORA_PORT:-8080}"
 choose_available_port "$BITORA_PORT"
 
@@ -209,6 +210,7 @@ docker run -d \
   --restart unless-stopped \
   --network traefik-network \
   -e DOCKER_API_VERSION=1.40 \
+  -e BITORA_IMAGE_REPOSITORY="$BITORA_IMAGE_REPOSITORY" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v $INSTALL_DIR/data:/var/www/html/storage \
   -p ${BITORA_PORT}:80 \
@@ -224,6 +226,13 @@ sleep 5
 # Generate app key
 echo -e "${YELLOW}Generating application key...${NC}"
 docker exec bitora-panel php artisan key:generate --force
+
+# Refresh the queue worker so it loads the runtime application key.
+docker restart bitora-panel
+
+# Livewire's endpoint prefix is derived from APP_KEY, so remove route caches
+# created with the image's build-time key.
+docker exec bitora-panel php artisan route:clear
 
 # Run migrations
 echo -e "${YELLOW}Running database migrations...${NC}"

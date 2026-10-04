@@ -69,6 +69,21 @@ class ProjectContainerService
         return $project->fresh();
     }
 
+    public function ensureProjectUrl(Project $project): Project
+    {
+        if ($project->status !== 'active' || filled($project->domain) || $project->port !== null) {
+            return $project;
+        }
+
+        $projectPath = $this->deploymentService->getProjectPath($project);
+
+        if ($this->ensurePort($project, $projectPath)) {
+            $this->composeService->generateComposeFile($project, $projectPath);
+        }
+
+        return $project->fresh();
+    }
+
     private function ensurePort(Project $project, string $projectPath): bool
     {
         if ($project->port !== null || ! is_dir($projectPath)) {

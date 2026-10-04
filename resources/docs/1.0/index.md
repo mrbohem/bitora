@@ -5,3 +5,6 @@
 - ## Usage
     - [Deploy a Project](/{{route}}/{{version}}/deploy-project)
     - [Managing Projects](/{{route}}/{{version}}/managing-projects)
+
+- ## Advanced
+    - [Architecture & Design](/{{route}}/{{version}}/architecture)

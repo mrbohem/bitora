@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Project;
+use App\Services\Docker\Contracts\FrameworkStrategyInterface;
 use App\Services\Docker\FrameworkStrategyFactory;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
@@ -19,7 +20,7 @@ class DockerImageService
     public function generateDockerfile(Project $project, string $projectPath): string
     {
         $dockerfilePath = "{$projectPath}/Dockerfile";
-        $strategy = $this->strategyFactory->make($project);
+        $strategy = $this->resolveStrategy($project);
 
         $dockerfileContent = $strategy->generateDockerfile($project, $projectPath);
         File::put($dockerfilePath, $dockerfileContent);
@@ -35,8 +36,7 @@ class DockerImageService
         $configDir = "{$projectPath}/docker";
         File::ensureDirectoryExists($configDir, 0755, true);
 
-        $strategy = $this->strategyFactory->make($project);
-        $configs = $strategy->generateNginxConfig($project);
+        $configs = $this->resolveStrategy($project)->generateNginxConfig($project);
 
         File::put("{$configDir}/nginx.conf", $configs['main']);
         File::put("{$configDir}/default.conf", $configs['site']);
@@ -50,8 +50,7 @@ class DockerImageService
         $configDir = "{$projectPath}/docker";
         File::ensureDirectoryExists($configDir, 0755, true);
 
-        $strategy = $this->strategyFactory->make($project);
-        $supervisorConf = $strategy->generateSupervisorConfig($project);
+        $supervisorConf = $this->resolveStrategy($project)->generateSupervisorConfig($project);
 
         File::put("{$configDir}/supervisord.conf", $supervisorConf);
     }
@@ -71,5 +70,14 @@ class DockerImageService
         if ($result->failed()) {
             throw new \RuntimeException("Failed to build Docker image: {$result->errorOutput()}");
         }
+    }
+
+    /**
+     * Resolve the framework strategy for the given project.
+     * Centralised here so each public method does not call the factory separately.
+     */
+    private function resolveStrategy(Project $project): FrameworkStrategyInterface
+    {
+        return $this->strategyFactory->make($project);
     }
 }

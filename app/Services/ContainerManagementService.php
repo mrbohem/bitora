@@ -17,23 +17,13 @@ class ContainerManagementService implements ContainerCommandExecutor
     ) {}
 
     /**
-     * Get docker command prefix (with or without sudo based on environment)
-     * In production Docker containers, www-data user needs sudo
-     * In local development, current user has direct Docker access
-     */
-    private function dockerCmd(string $command): string
-    {
-        return $this->dockerCommand($command);
-    }
-
-    /**
      * Start container using docker-compose
      */
     public function startContainer(Project $project, string $projectPath): string
     {
         $result = Process::timeout(120)
             ->path($projectPath)
-            ->run($this->dockerCmd('docker-compose up -d --force-recreate'));
+            ->run($this->dockerCommand('docker-compose up -d --force-recreate'));
 
         if ($result->failed()) {
             throw new \RuntimeException("Failed to start container: {$result->errorOutput()}");
@@ -52,7 +42,7 @@ class ContainerManagementService implements ContainerCommandExecutor
     {
         $result = Process::timeout(60)
             ->path($projectPath)
-            ->run($this->dockerCmd('docker-compose stop'));
+            ->run($this->dockerCommand('docker-compose stop'));
 
         if ($result->failed()) {
             throw new \RuntimeException("Failed to stop container: {$result->errorOutput()}");
@@ -66,7 +56,7 @@ class ContainerManagementService implements ContainerCommandExecutor
     {
         $result = Process::timeout(120)
             ->path($projectPath)
-            ->run($this->dockerCmd('docker-compose up -d --force-recreate'));
+            ->run($this->dockerCommand('docker-compose up -d --force-recreate'));
 
         if ($result->failed()) {
             throw new \RuntimeException("Failed to restart container: {$result->errorOutput()}");
@@ -93,7 +83,7 @@ class ContainerManagementService implements ContainerCommandExecutor
         }
 
         $result = Process::timeout(120)
-            ->run($this->dockerCmd('docker restart '.escapeshellarg($containerId)));
+            ->run($this->dockerCommand('docker restart '.escapeshellarg($containerId)));
 
         if ($result->failed()) {
             throw new \RuntimeException("Failed to restart container: {$result->errorOutput()}");
@@ -109,7 +99,7 @@ class ContainerManagementService implements ContainerCommandExecutor
     {
         $result = Process::timeout(300)
             ->path($projectPath)
-            ->run($this->dockerCmd('docker-compose up -d --build --force-recreate'));
+            ->run($this->dockerCommand('docker-compose up -d --build --force-recreate'));
 
         if ($result->failed()) {
             throw new \RuntimeException("Failed to rebuild container: {$result->errorOutput()}");
@@ -137,7 +127,7 @@ class ContainerManagementService implements ContainerCommandExecutor
             }
 
             $result = Process::timeout(60)
-                ->run($this->dockerCmd("docker rm -fv {$containerId}"));
+                ->run($this->dockerCommand("docker rm -fv {$containerId}"));
 
             if ($result->failed()) {
                 throw new \RuntimeException("Failed to remove container: {$result->errorOutput()}");
@@ -148,7 +138,7 @@ class ContainerManagementService implements ContainerCommandExecutor
 
         $result = Process::timeout(60)
             ->path($projectPath)
-            ->run($this->dockerCmd('docker-compose down -v'));
+            ->run($this->dockerCommand('docker-compose down -v'));
 
         if ($result->failed()) {
             throw new \RuntimeException("Failed to remove container: {$result->errorOutput()}");
@@ -162,7 +152,7 @@ class ContainerManagementService implements ContainerCommandExecutor
     {
         $containerName = "bitora-{$project->slug}-app";
 
-        $result = Process::run($this->dockerCmd("docker ps -aq -f name={$containerName}"));
+        $result = Process::run($this->dockerCommand("docker ps -aq -f name={$containerName}"));
 
         if ($result->failed()) {
             return null;
@@ -185,7 +175,7 @@ class ContainerManagementService implements ContainerCommandExecutor
             ];
         }
 
-        $result = Process::run($this->dockerCmd("docker inspect {$containerId} --format='{{.State.Status}}'"));
+        $result = Process::run($this->dockerCommand("docker inspect {$containerId} --format='{{.State.Status}}'"));
 
         if ($result->failed()) {
             return [
@@ -213,7 +203,7 @@ class ContainerManagementService implements ContainerCommandExecutor
             return '';
         }
 
-        $result = Process::run($this->dockerCmd("docker logs --tail {$lines} {$containerId}"));
+        $result = Process::run($this->dockerCommand("docker logs --tail {$lines} {$containerId}"));
 
         return $result->output();
     }
@@ -235,7 +225,7 @@ class ContainerManagementService implements ContainerCommandExecutor
             escapeshellarg($command)
         );
 
-        $result = Process::timeout(300)->run($this->dockerCmd($dockerCommand));
+        $result = Process::timeout(300)->run($this->dockerCommand($dockerCommand));
 
         if ($result->failed()) {
             throw new \RuntimeException("Command execution failed: {$result->errorOutput()}");
@@ -255,14 +245,14 @@ class ContainerManagementService implements ContainerCommandExecutor
             return [];
         }
 
-        $result = Process::run($this->dockerCmd("docker stats {$containerId} --no-stream --format='{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}'"));
+        $result = Process::run($this->dockerCommand("docker stats {$containerId} --no-stream --format='{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}'"));
 
         if ($result->failed()) {
             return [];
         }
 
         $stats = explode('|', trim($result->output()));
-        $containerLimitResult = Process::run($this->dockerCmd("docker inspect {$containerId} --format='{{.HostConfig.Memory}}'"));
+        $containerLimitResult = Process::run($this->dockerCommand("docker inspect {$containerId} --format='{{.HostConfig.Memory}}'"));
         $containerLimitBytes = trim($containerLimitResult->output());
         $memoryLimit = $containerLimitResult->successful() && is_numeric($containerLimitBytes) && (int) $containerLimitBytes > 0
             ? $this->formatBytes((int) $containerLimitBytes)
@@ -310,14 +300,14 @@ class ContainerManagementService implements ContainerCommandExecutor
      */
     public function isDockerAvailable(): bool
     {
-        $result = Process::run($this->dockerCmd('docker --version'));
+        $result = Process::run($this->dockerCommand('docker --version'));
 
         if ($result->failed()) {
             return false;
         }
 
         // Check if Docker daemon is running
-        $daemonCheck = Process::run($this->dockerCmd('docker ps'));
+        $daemonCheck = Process::run($this->dockerCommand('docker ps'));
 
         return $daemonCheck->successful();
     }
@@ -327,7 +317,7 @@ class ContainerManagementService implements ContainerCommandExecutor
      */
     public function isDockerComposeAvailable(): bool
     {
-        $result = Process::run($this->dockerCmd('docker-compose --version'));
+        $result = Process::run($this->dockerCommand('docker-compose --version'));
 
         return $result->successful();
     }
@@ -353,13 +343,13 @@ class ContainerManagementService implements ContainerCommandExecutor
             return null;
         }
 
-        $result = Process::run($this->dockerCmd("docker port {$containerId} 80"));
+        $result = Process::run($this->dockerCommand("docker port {$containerId} 80"));
 
         if (($result->failed() || empty(trim($result->output()))) && $project->container_id !== null) {
             $containerId = $this->getContainerId($project);
 
             if ($containerId !== null) {
-                $result = Process::run($this->dockerCmd("docker port {$containerId} 80"));
+                $result = Process::run($this->dockerCommand("docker port {$containerId} 80"));
             }
         }
 
@@ -374,5 +364,25 @@ class ContainerManagementService implements ContainerCommandExecutor
         }
 
         return null;
+    }
+
+    /**
+     * Get the full public URL for the project, resolving the external port when no domain is set.
+     *
+     * Use this instead of $project->url when port-based access is needed.
+     */
+    public function getExternalUrl(Project $project, string $host): ?string
+    {
+        if ($project->status !== 'active') {
+            return null;
+        }
+
+        if ($project->domain) {
+            return 'http://'.$project->domain;
+        }
+
+        $externalPort = $this->getExternalPort($project);
+
+        return $externalPort ? "http://{$host}:{$externalPort}" : null;
     }
 }

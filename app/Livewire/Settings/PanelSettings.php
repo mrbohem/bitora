@@ -2,8 +2,12 @@
 
 namespace App\Livewire\Settings;
 
+use App\Services\PanelUpdateService;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Process;
 use Livewire\Component;
+use RuntimeException;
 
 class PanelSettings extends Component
 {
@@ -13,11 +17,24 @@ class PanelSettings extends Component
 
     public $sshPublicKey = '';
 
-    public function mount()
+    public string $currentVersion = '';
+
+    public ?string $latestVersion = null;
+
+    public bool $updateAvailable = false;
+
+    public ?string $updateError = null;
+
+    public array $updateStatus = [];
+
+    public function mount(PanelUpdateService $panelUpdateService): void
     {
         $this->panelName = config('app.name', 'Lumina Forge');
         $this->defaultWebServer = config('forge.default_web_server', 'nginx');
         $this->sshPublicKey = $this->getServerSshKey();
+        $this->currentVersion = $panelUpdateService->currentVersion();
+        $this->updateStatus = $panelUpdateService->status();
+        $this->checkForUpdates($panelUpdateService);
     }
 
     public function save()
@@ -60,6 +77,41 @@ class PanelSettings extends Component
             $this->dispatch('notify', message: 'SSH key generated successfully!', type: 'success');
         } else {
             $this->dispatch('notify', message: 'SSH key already exists!', type: 'info');
+        }
+    }
+
+    public function checkForUpdates(PanelUpdateService $panelUpdateService): void
+    {
+        $this->updateError = null;
+
+        try {
+            $latestRelease = $panelUpdateService->latestRelease();
+            $this->latestVersion = $latestRelease['version'] ?? null;
+            $this->updateAvailable = $panelUpdateService->updateAvailable($latestRelease);
+        } catch (ConnectionException|RequestException|RuntimeException $exception) {
+            $this->updateError = 'Unable to check Docker Hub for updates: '.$exception->getMessage();
+        }
+    }
+
+    public function updatePanel(PanelUpdateService $panelUpdateService): void
+    {
+        $this->updateError = null;
+
+        try {
+            $panelUpdateService->startUpdate();
+            $this->updateStatus = $panelUpdateService->status();
+        } catch (ConnectionException|RequestException|RuntimeException $exception) {
+            $this->updateError = 'Panel update could not be started: '.$exception->getMessage();
+        }
+    }
+
+    public function refreshUpdateStatus(PanelUpdateService $panelUpdateService): void
+    {
+        $this->updateStatus = $panelUpdateService->status();
+
+        if (in_array($this->updateStatus['status'] ?? null, ['completed', 'failed'], true)) {
+            $this->currentVersion = $panelUpdateService->currentVersion();
+            $this->checkForUpdates($panelUpdateService);
         }
     }
 

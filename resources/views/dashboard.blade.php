@@ -87,7 +87,7 @@
                 </div>
                 <div class="space-y-4">
                     @php
-                        $activities = app(\App\Services\ActivityLogService::class)->getUserActivities(auth()->user(), 10);
+                        $activities = auth()->user()->activityLogs()->with('project')->latest()->limit(10)->get();
                     @endphp
                     @forelse($activities as $activity)
                         <div class="flex gap-3">

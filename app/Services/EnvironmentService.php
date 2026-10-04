@@ -137,7 +137,7 @@ class EnvironmentService
 
             // Write to container using heredoc
             $escapedContent = str_replace("'", "'\\''", $newContent);
-            $this->containerService->execCommand($project, "sh -c 'cat > /var/www/html/.env << \"ENVEOF\"\n{$newContent}\nENVEOF'");
+            $this->containerService->execCommand($project, "sh -c 'cat > /var/www/html/.env << \"ENVEOF\"\n{$escapedContent}\nENVEOF'");
         } catch (\Exception $e) {
             // Fallback to host file
             $this->syncToEnvFileOnHost($project);

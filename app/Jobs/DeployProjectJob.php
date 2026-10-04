@@ -4,8 +4,10 @@ namespace App\Jobs;
 
 use App\Events\DeploymentStatusUpdated;
 use App\Models\Project;
+use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\ContainerManagementService;
+use App\Services\DeploymentService;
 use App\Services\DockerComposeService;
 use App\Services\DockerImageService;
 use App\Services\GitService;
@@ -41,11 +43,12 @@ class DeployProjectJob implements ShouldQueue
         DockerImageService $dockerImageService,
         DockerComposeService $dockerComposeService,
         ContainerManagementService $containerService,
-        ActivityLogService $activityLogService
+        ActivityLogService $activityLogService,
+        DeploymentService $deploymentService
     ): void {
         try {
             $this->project->refresh();
-            $projectPath = storage_path("app/projects/{$this->project->slug}");
+            $projectPath = $deploymentService->getProjectPath($this->project);
 
             // Step 1: Clone Repository
             if (! empty($this->project->git_repo)) {
@@ -88,21 +91,39 @@ class DeployProjectJob implements ShouldQueue
             $containerId = $containerService->startContainer($this->project, $projectPath);
             $this->updateProgress(100);
 
+            $this->project->container_id = $containerId;
+            $port = $this->project->port;
+
+            if (empty($this->project->domain)) {
+                $port = $containerService->getExternalPort($this->project);
+
+                if ($port === null) {
+                    throw new \RuntimeException('The project external port could not be detected after the container started.');
+                }
+
+                $this->project->port = $port;
+                $dockerComposeService->generateComposeFile($this->project, $projectPath);
+            }
+
             // Step 5: Mark as Active
             $this->project->update([
                 'container_id' => $containerId,
+                'port' => $port,
                 'docker_network' => 'traefik-network',
                 'status' => 'active',
                 'deployment_error' => null,
                 'deployed_at' => now(),
             ]);
 
-            $activityLogService->log(
-                $this->project,
-                $this->project->user,
-                'project.deployed',
-                "Successfully deployed project: {$this->project->name}"
-            );
+            $user = $this->project->user;
+            if ($user instanceof User) {
+                $activityLogService->log(
+                    $this->project,
+                    $user,
+                    'project.deployed',
+                    "Successfully deployed project: {$this->project->name}"
+                );
+            }
 
             $this->updateStatus('active', 'Project deployed successfully!');
         } catch (\Exception $e) {
@@ -111,12 +132,15 @@ class DeployProjectJob implements ShouldQueue
                 'deployment_error' => $e->getMessage(),
             ]);
 
-            $activityLogService->log(
-                $this->project,
-                $this->project->user,
-                'project.failed',
-                "Failed to deploy project: {$e->getMessage()}"
-            );
+            $user = $this->project->user;
+            if ($user instanceof User) {
+                $activityLogService->log(
+                    $this->project,
+                    $user,
+                    'project.failed',
+                    "Failed to deploy project: {$e->getMessage()}"
+                );
+            }
 
             throw $e;
         }

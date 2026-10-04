@@ -90,13 +90,16 @@ class Show extends Component
 
     public string $commandError = '';
 
-    public function mount(Project $project, EnvironmentService $environmentService)
-    {
+    public function mount(
+        Project $project,
+        EnvironmentService $environmentService,
+        ProjectContainerService $projectContainerService,
+    ) {
         abort_unless($project->user_id === auth()->id(), 403);
 
-        $this->project = $project;
-        $this->deploymentStatus = $project->status;
-        $this->deploymentProgress = cache()->get("deployment.{$project->id}.progress", 0);
+        $this->project = $projectContainerService->ensureProjectUrl($project);
+        $this->deploymentStatus = $this->project->status;
+        $this->deploymentProgress = cache()->get("deployment.{$this->project->id}.progress", 0);
         $this->loadSettings();
 
         // Sync .env file to database on page load
@@ -123,6 +126,16 @@ class Show extends Component
 
         // Refresh project model
         $this->project->refresh();
+    }
+
+    public function refreshDeploymentStatus(): void
+    {
+        $this->project->refresh();
+        $this->deploymentStatus = $this->project->status;
+        $this->deploymentProgress = cache()->get(
+            "deployment.{$this->project->id}.progress",
+            $this->deploymentProgress
+        );
     }
 
     public function startProject(ProjectContainerService $projectContainerService)
@@ -181,7 +194,7 @@ class Show extends Component
 
     public function deleteCronJob($id)
     {
-        $cronJob = CronJob::findOrFail($id);
+        $cronJob = $this->project->cronJobs()->findOrFail($id);
         $cronJob->delete();
 
         $this->dispatch('notify', message: 'Cron job deleted successfully! Restart project to apply changes.', type: 'success');
@@ -189,7 +202,7 @@ class Show extends Component
 
     public function toggleCronJob($id)
     {
-        $cronJob = CronJob::findOrFail($id);
+        $cronJob = $this->project->cronJobs()->findOrFail($id);
         $cronJob->update(['enabled' => ! $cronJob->enabled]);
 
         $this->dispatch('notify', message: 'Cron job updated! Restart project to apply changes.', type: 'success');
@@ -205,13 +218,12 @@ class Show extends Component
         $environmentService->setVariable($this->project, auth()->user(), $validated['envKey'], $validated['envValue']);
 
         $this->reset(['envKey', 'envValue', 'showEnvModal', 'editingEnvId']);
-        $this->syncEnvFromFile($environmentService);
         $this->dispatch('notify', message: 'Environment variable saved successfully!', type: 'success');
     }
 
     public function editEnvVariable($id)
     {
-        $variable = EnvironmentVariable::findOrFail($id);
+        $variable = $this->project->environmentVariables()->findOrFail($id);
         $this->editingEnvId = $variable->id;
         $this->envKey = $variable->key;
         $this->envValue = $variable->value;
@@ -220,10 +232,9 @@ class Show extends Component
 
     public function deleteEnvVariable($id, EnvironmentService $environmentService)
     {
-        $variable = EnvironmentVariable::findOrFail($id);
+        $variable = $this->project->environmentVariables()->findOrFail($id);
         $environmentService->deleteVariable($variable, auth()->user());
 
-        $this->syncEnvFromFile($environmentService);
         $this->dispatch('notify', message: 'Environment variable deleted successfully!', type: 'success');
     }
 
@@ -356,27 +367,21 @@ class Show extends Component
     }
 
     #[Computed]
-    public function containerStatus()
+    public function containerStatus(): array
     {
-        $containerService = app(ContainerManagementService::class);
-
-        return $containerService->getContainerStatus($this->project);
+        return app(ContainerManagementService::class)->getContainerStatus($this->project);
     }
 
     #[Computed]
-    public function containerStats()
+    public function containerStats(): array
     {
-        $containerService = app(ContainerManagementService::class);
-
-        return $containerService->getContainerStats($this->project);
+        return app(ContainerManagementService::class)->getContainerStats($this->project);
     }
 
     #[Computed]
-    public function logs()
+    public function logs(): string
     {
-        $containerService = app(ContainerManagementService::class);
-
-        return $containerService->getContainerLogs($this->project, $this->logLines);
+        return app(ContainerManagementService::class)->getContainerLogs($this->project, $this->logLines);
     }
 
     public function refreshLogs()

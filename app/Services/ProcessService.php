@@ -8,10 +8,17 @@ use App\Models\User;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 
+/**
+ * Manages Supervisor worker processes for deployed projects.
+ *
+ * Responsibility: create, start, stop, restart, and delete
+ * Supervisor workers. Cron job management lives in CronJobService.
+ */
 class ProcessService
 {
     public function __construct(
-        private ActivityLogService $activityLogService
+        private ActivityLogService $activityLogService,
+        private DeploymentService $deploymentService,
     ) {}
 
     /**
@@ -140,7 +147,7 @@ class ProcessService
      */
     private function generateSupervisorConfig(SupervisorWorker $worker): void
     {
-        $projectPath = app(DeploymentService::class)->getProjectPath($worker->project);
+        $projectPath = $this->deploymentService->getProjectPath($worker->project);
 
         $config = <<<SUPERVISOR
 [program:{$worker->name}]
@@ -168,27 +175,5 @@ SUPERVISOR;
     {
         Process::run('supervisorctl reread');
         Process::run('supervisorctl update');
-    }
-
-    /**
-     * Sync cron jobs to system crontab
-     */
-    public function syncCronJobs(Project $project): void
-    {
-        $cronJobs = $project->cronJobs()->where('enabled', true)->get();
-
-        $crontabContent = "# Lumina Forge - {$project->name}\n";
-
-        foreach ($cronJobs as $job) {
-            $crontabContent .= "{$job->schedule} {$job->command}\n";
-        }
-
-        $tempFile = tempnam(sys_get_temp_dir(), 'cron');
-        File::put($tempFile, $crontabContent);
-
-        // Note: In production, this would need proper user context
-        Process::run("crontab {$tempFile}");
-
-        File::delete($tempFile);
     }
 }

@@ -28,6 +28,8 @@ sleep 3
 
 # Setup
 docker exec bitora-panel php artisan key:generate --force
+docker restart bitora-panel
+docker exec bitora-panel php artisan route:clear
 docker exec bitora-panel php artisan migrate --force
 
 echo ""

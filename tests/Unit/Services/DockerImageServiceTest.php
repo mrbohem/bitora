@@ -29,7 +29,7 @@ test('generates dockerfile with correct php version', function () {
         ->toContain('Make memory reporting cgroup-aware')
         ->toContain('/sys/fs/cgroup/memory.max');
     expect($content)->toContain('docker-php-ext-install pdo pdo_mysql pdo_pgsql pdo_sqlite mbstring exif pcntl bcmath gd zip sockets intl');
-    expect($content)->toContain('composer install --no-dev --no-plugins --optimize-autoloader --no-interaction');
+    expect($content)->toContain('composer install --no-dev --no-plugins --no-scripts --optimize-autoloader --no-interaction');
     expect($content)->toContain('git config --global --add safe.directory /var/www/html');
 
     File::deleteDirectory($projectPath);

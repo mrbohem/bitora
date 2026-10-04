@@ -125,7 +125,7 @@
 
     <!-- Deployment Progress (shown during deployment) -->
     @if(in_array($deploymentStatus, ['pending', 'cloning', 'installing', 'generating', 'building', 'starting', 'deploying']))
-        <div class="rounded-lg p-6" style="background-color: var(--color-surface-container); border: 1px solid var(--color-primary);">
+        <div wire:poll.2s="refreshDeploymentStatus" class="rounded-lg p-6" style="background-color: var(--color-surface-container); border: 1px solid var(--color-primary);">
             <div class="flex items-center gap-3 mb-4">
                 <div class="animate-spin">
                     <flux:icon.arrow-path class="size-5" style="color: var(--color-primary);" />

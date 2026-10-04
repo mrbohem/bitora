@@ -98,22 +98,7 @@ class Deploy extends Component
     {
         $this->normalizeCpuLimit();
 
-        $validated = $this->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'git_repo' => ['nullable', 'url'],
-            'git_branch' => ['nullable', 'string', 'max:255'],
-            'app_path' => ['required', 'string', 'max:255', 'regex:/^(?:\.|[A-Za-z0-9_][A-Za-z0-9._\/-]*)$/'],
-            'git_auth_type' => ['required', 'in:none,ssh,token'],
-            'git_credentials' => ['nullable', 'string'],
-            'domain' => ['nullable', 'string', 'max:255'],
-            'queue_enabled' => ['boolean'],
-            'queue_connection' => ['nullable', 'required_if:queue_enabled,true', 'string', 'max:50'],
-            'queue_workers' => ['nullable', 'integer', 'min:1', 'max:10'],
-            'memory_limit_mb' => ['nullable', 'integer', 'min:128'],
-            'storage_limit_gb' => ['nullable', 'integer', 'min:1'],
-            'cpu_limit_cores' => ['nullable', 'numeric', 'decimal:0,2', 'min:0.01'],
-            'env_variables' => ['nullable', 'array'],
-        ]);
+        $validated = $this->validate($this->allRules());
 
         $this->validateResourceLimits($resourceService);
 
@@ -139,7 +124,19 @@ class Deploy extends Component
             $this->normalizeCpuLimit();
         }
 
-        $rules = match ($this->step) {
+        $this->validate($this->stepRules($this->step));
+
+        if ($this->step === 3) {
+            $this->validateResourceLimits($resourceService);
+        }
+    }
+
+    /**
+     * @return array<string, array<mixed>>
+     */
+    public function stepRules(int $step): array
+    {
+        return match ($step) {
             1 => [
                 'name' => ['required', 'string', 'max:255'],
                 'git_repo' => ['nullable', 'url'],
@@ -160,12 +157,20 @@ class Deploy extends Component
             ],
             default => [],
         };
+    }
 
-        $this->validate($rules);
-
-        if ($this->step === 3) {
-            $this->validateResourceLimits($resourceService);
-        }
+    /**
+     * @return array<string, array<mixed>>
+     */
+    public function allRules(): array
+    {
+        return [
+            ...$this->stepRules(1),
+            'git_credentials' => ['nullable', 'string'],
+            ...$this->stepRules(2),
+            ...$this->stepRules(3),
+            'env_variables' => ['nullable', 'array'],
+        ];
     }
 
     private function validateResourceLimits(ContainerResourceService $resourceService): void
